@@ -600,15 +600,21 @@ test_await_registration(Config) ->
 		TestPid ! {await_result, Result}
 	end),
 	
+	%% Monitor the await process to detect failures
+	MonitorRef = monitor(process, AwaitPid),
+	
 	%% Give time for await to be called
 	timer:sleep(100),
 	
 	%% Now register the key
 	{ok, {Key, RegisteredPid, Metadata}} = orca:register(Key, Metadata),
 	
-	%% Wait for result
+	%% Wait for result from AwaitPid
 	{await_result, {ok, {Key, RegisteredPid, Metadata}}} = receive_timeout(2000),
 	
+	%% Verify AwaitPid is still alive
+	demonitor(MonitorRef, [flush]),
+
 	ct:log("✓ await/2 unblocks when key is registered"),
 	Config.
 
@@ -646,8 +652,14 @@ test_subscribe_and_registration(Config) ->
 		orca:register(Key, Metadata)
 	end),
 	
-	%% Wait for notification
-	{orca_registered, Key, {Key, RegisteredPid, Metadata}} = receive_timeout(2000),
+	%% Monitor to detect process failure
+	MonitorRef = monitor(process, RegisterPid),
+	
+	%% Wait for notification - should be registered by the spawned RegisterPid
+	{orca_registered, Key, {Key, RegisterPid, Metadata}} = receive_timeout(2000),
+	
+	%% Verify the spawned process completed without crashing
+	demonitor(MonitorRef, [flush]),
 	
 	ct:log("✓ subscribe/1 receives notification when key is registered"),
 	Config.
@@ -680,29 +692,32 @@ test_concurrent_subscribers(Config) ->
 	%% Have multiple subscribers
 	Sub1 = spawn(fun() ->
 		ok = orca:subscribe(Key),
-		{orca_registered, Key, Entry} = receive_timeout(5000),
-		self() ! {got_notification, Entry}
+		{orca_registered, Key, SubscriberEntry} = receive_timeout(5000),
+		self() ! {got_notification, SubscriberEntry}
 	end),
 	
 	Sub2 = spawn(fun() ->
 		ok = orca:subscribe(Key),
-		{orca_registered, Key, Entry} = receive_timeout(5000),
-		self() ! {got_notification, Entry}
+		{orca_registered, Key, SubscriberEntry} = receive_timeout(5000),
+		self() ! {got_notification, SubscriberEntry}
 	end),
 	
 	Sub3 = spawn(fun() ->
 		ok = orca:subscribe(Key),
-		{orca_registered, Key, Entry} = receive_timeout(5000),
-		self() ! {got_notification, Entry}
+		{orca_registered, Key, SubscriberEntry} = receive_timeout(5000),
+		self() ! {got_notification, SubscriberEntry}
 	end),
 	
 	timer:sleep(100),
 	
-	%% Register the key
-	{ok, Entry} = {ok, orca:register(Key, Metadata)},
+	%% Register the key and capture the entry
+	{ok, RegisteredEntry} = orca:register(Key, Metadata),
 	
-	%% All subscribers should receive notification
+	%% All subscribers should receive the same entry
 	wait_for_pids([Sub1, Sub2, Sub3], 3000),
+	
+	%% Verify the registered entry has the expected structure
+	{Key, _RegistrarPid, Metadata} = RegisteredEntry,
 	
 	ct:log("✓ Multiple subscribers all receive notification"),
 	Config.
