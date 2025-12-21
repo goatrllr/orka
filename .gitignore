@@ -1,0 +1,38 @@
+# Erlang/OTP build artifacts
+ebin/
+deps/
+_build/
+*.beam
+*.plt
+*.swp
+*~
+.eunit
+erl_crash.dump
+rel/
+
+# erlang.mk generated files
+*.d
+erlang.mk
+
+# Test coverage
+.cover
+cover/
+coverdata/
+
+# Common Test logs
+logs/
+ct_run.*
+
+# IDE and editor artifacts
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary files
+*.tmp
+*.log
+.#*

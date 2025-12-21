@@ -1,0 +1,15 @@
+{application, orca, [
+	{description, "Generic process registry using ETS and monitors"},
+	{vsn, "0.1.0"},
+	{registered, [orca_sup, orca_registry]},
+	{mod, {orca_app, []}},
+	{applications, [
+		kernel,
+		stdlib
+	]},
+	{env, []},
+	{modules, []},
+	{maintainers, []},
+	{licenses, []},
+	{links, []}
+]}.
