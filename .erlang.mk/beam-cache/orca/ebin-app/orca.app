@@ -8,7 +8,7 @@
 		stdlib
 	]},
 	{env, []},
-	{modules, []},
+	{modules, ['orca','orca_app','orca_sup']},
 	{maintainers, []},
 	{licenses, []},
 	{links, []}

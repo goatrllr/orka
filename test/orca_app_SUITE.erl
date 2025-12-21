@@ -54,7 +54,7 @@ test_application_start(Config) ->
 	timer:sleep(100),
 
 	%% Verify registry is running
-	true = is_pid(whereis(orca_registry)),
+	true = is_pid(whereis(orca)),
 
 	ct:log("✓ Application started successfully"),
 	Config.
@@ -79,15 +79,15 @@ test_supervisor_tree(Config) ->
 	true = is_pid(whereis(orca_sup)),
 
 	%% Verify registry GenServer is running
-	true = is_pid(whereis(orca_registry)),
+	true = is_pid(whereis(orca)),
 
-	%% Check that supervisor has orca_registry as a child
+	%% Check that supervisor has orca as a child
 	Pids = supervisor:which_children(orca_sup),
 	true = length(Pids) >= 1,
 
-	%% Verify orca_registry is in the children list
+	%% Verify orca is in the children list
 	ChildIds = [Id || {Id, _Pid, _Type, _Modules} <- Pids],
-	true = lists:member(orca_registry, ChildIds),
+	true = lists:member(orca, ChildIds),
 
 	ct:log("✓ Supervisor tree correctly configured"),
 	Config.
@@ -102,10 +102,10 @@ test_registry_available_after_start(Config) ->
 	Pid = self(),
 	Metadata = #{test => true},
 
-	ok = orca_registry:register(Key, Pid, Metadata),
+	{ok, {Key, Pid, Metadata}} = orca:register(Key, Pid, Metadata),
 
 	%% Verify we can look it up
-	{ok, {Key, Pid, Metadata}} = orca_registry:lookup(Key),
+	{ok, {Key, Pid, Metadata}} = orca:lookup(Key),
 
 	ct:log("✓ Registry is fully operational after start"),
 	Config.

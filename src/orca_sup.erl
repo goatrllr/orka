@@ -10,12 +10,12 @@ start_link() ->
 init([]) ->
 	Procs = [
 		#{
-			id => orca_registry,
-			start => {orca_registry, start_link, []},
+			id => orca,
+			start => {orca, start_link, []},
 			restart => permanent,
 			shutdown => 5000,
 			type => worker,
-			modules => [orca_registry]
+			modules => [orca]
 		}
 	],
 	{ok, {{one_for_one, 1, 5}, Procs}}.
