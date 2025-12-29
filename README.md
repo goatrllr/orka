@@ -238,7 +238,7 @@ Add to your `rebar.config`:
 
 ```erlang
 {deps, [
-    {orca, {git, "https://github.com/your-org/orca.git", {branch, "main"}}}
+    {orca, {git, "https://github.com/goatrllr/orca.git", {branch, "main"}}}
 ]}.
 ```
 
