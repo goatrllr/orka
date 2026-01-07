@@ -50,11 +50,14 @@
 % Metadata Structure: #{field1 => value1, field2 => value2, ...}
 % Simple metadata (backward compatible)
 % Metadata = #{
-%     tags => [high_priority, translator, online],      %% Categories for querying
-%     properties => #{                                    %% Custom data
+%     tags => [high_priority, translator, online, authenticated, premium],      %% Categories for querying
+%     properties => #{                                    %% Custom data - any Erlang term
 %         version => "1.0.2",
 %         max_connections => 100,
-%         status => active
+%         status => active,
+%         config => #{timeout => 5000, retries => 3},     %% Nested maps
+%         location => {37.7749, -122.4194},               %% Tuples for coordinates
+%         features => [streaming, batch, webhooks]        %% Lists of atoms
 %     },
 %     created_at => erlang:system_time(millisecond),
 %     owner => "supervisor_1"
@@ -64,25 +67,43 @@
 
 % User registration (self-register)
 % orca:register({global, user, "mark@example.com"}, #{
-%     tags => [user, online],
-%     properties => #{region => "us-west"}
+%     tags => [user, online, authenticated, premium],
+%     properties => #{
+%         region => "us-west",
+%         subscription_level => gold,
+%         preferences => #{theme => dark, notifications => enabled}
+%     }
 % }).
 
 % Service registration (supervisor registers)
 % orca:register({global, service, translator}, ServicePid, #{
-%     tags => [service, translator, critical],
+%     tags => [service, translator, critical, multilingual],
 %     properties => #{
 %         version => "2.1.0",
-%         languages => [en, es, fr]
+%         languages => [en, es, fr, de],
+%         capacity => 150,
+%         endpoints => ["api.translator.com", "backup.translator.com"]
 %     }
 % }).
 
 % Resource tracking
 % orca:register({global, resource, {db, primary}}, DbPid, #{
-%     tags => [resource, database, critical],
+%     tags => [resource, database, critical, replicated],
 %     properties => #{
 %         pool_size => 50,
-%         connected_clients => 12
+%         connected_clients => 12,
+%         location => {37.7749, -122.4194},  %% Geo coordinates
+%         config => #{max_connections => 1000, timeout => 30000}
+%     }
+% }).
+
+% Worker pool registration
+% orca:register({global, worker, image_processor_1}, WorkerPid, #{
+%     tags => [worker, image_processing, gpu_enabled],
+%     properties => #{
+%         capabilities => [resize, filter, compress],
+%         performance_score => 95,
+%         last_health_check => erlang:system_time(second)
 %     }
 % }).
 
@@ -629,6 +650,12 @@ count_by_tag(Tag) ->
 %%     #{property => region, value => "us-west"}).
 %% orca:register_property({global, resource, db_2}, DbPid2, 
 %%     #{property => region, value => "us-east"}).
+%%
+%% %% Register services with complex configuration
+%% orca:register_property({global, service, api_gateway}, ApiPid,
+%%     #{property => config, value => #{timeout => 5000, retries => 3}}).
+%% orca:register_property({global, service, worker_pool}, PoolPid,
+%%     #{property => capabilities, value => [image_resize, compression, filtering]}).
 register_property(Key, Pid, #{property := PropName, value := PropValue}) ->
 	gen_server:call(?MODULE, {register_property, Key, Pid, PropName, PropValue}).
 
@@ -653,6 +680,14 @@ register_property(Key, Pid, #{property := PropName, value := PropValue}) ->
 %% %% Find all translators with capacity over 100
 %% orca:find_by_property(capacity, 150).
 %% Result: [{{global, service, translator_2}, <0.124.0>, #{capacity => 150, ...}}]
+%%
+%% %% Find services with specific capabilities
+%% orca:find_by_property(capabilities, [image_resize, compression]).
+%% Result: [{{global, service, worker_pool}, <0.200.0>, #{capabilities => [image_resize, compression], ...}}]
+%%
+%% %% Find services with specific config
+%% orca:find_by_property(config, #{timeout => 5000, retries => 3}).
+%% Result: [{{global, service, api_gateway}, <0.150.0>, #{config => #{timeout => 5000, retries => 3}, ...}}]
 find_by_property(PropertyName, PropertyValue) ->
 	Keys = ets:match_object(?PROPERTY_INDEX_TABLE, {{property, PropertyName, PropertyValue}, '$1'}),
 	lists:filtermap(fun({{property, _, _}, Key}) ->
@@ -718,6 +753,14 @@ count_by_property(PropertyName, PropertyValue) ->
 %% %% Get distribution of capacities for all resources
 %% orca:property_stats(resource, capacity).
 %% Result: #{100 => 2, 150 => 3, 200 => 1}
+%%
+%% %% Get distribution of supported languages across services
+%% orca:property_stats(service, languages).
+%% Result: {[en, es, fr] => 2, [en, de] => 1, [en, es, fr, de] => 1}
+%%
+%% %% Get distribution of subscription levels for users
+%% orca:property_stats(user, subscription_level).
+%% Result: #{gold => 5, silver => 3, bronze => 2}
 property_stats(Type, PropertyName) ->
 	%% Get all property index entries for this property name
 	Entries = ets:match_object(?PROPERTY_INDEX_TABLE, {{property, PropertyName, '$1'}, '$2'}),
