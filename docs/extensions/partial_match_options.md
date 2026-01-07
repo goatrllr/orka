@@ -303,7 +303,7 @@ portfolio_for_user(UserId) ->
 
 %% Get all users (unique user_ids from property index)
 all_users() ->
-    Stats = orca:property_stats(user_service, user_id),
+    Stats = orca:property_stats(user_id, user_service),
     maps:keys(Stats).
 
 %% Get user service count

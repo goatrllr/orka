@@ -281,10 +281,17 @@ await(Key, Timeout) ->
 	%% Wait for notification (either {orca_registered, Key, Entry} or timeout)
 	receive
 		{orca_registered, Key, Entry} -> {ok, Entry};
-		{orca_await_timeout, Key} -> {error, timeout}
+		{orca_await_timeout, Key} -> 
+			gen_server:call(?MODULE, {unsubscribe, Key, self()}),	
+			{error, timeout}
 	after Timeout ->
 			%% Timeout occurred, unsubscribe and return error
 			gen_server:call(?MODULE, {unsubscribe, Key, self()}),
+			%% Drain any pending timeout message from the subscription timer.
+			receive
+				{orca_await_timeout, Key} -> ok
+			after 0 -> ok
+			end,
 			{error, timeout}
 	end.
 
@@ -657,10 +664,10 @@ find_by_property(PropertyName, PropertyValue) ->
 
 %% @doc Find entries with a specific property value, filtered by type.
 %% Combines property and type filtering for more specific queries.
-%% Filters by the first element of key tuple (e.g., Type is first element for {service, cache_1}).
+%% Filters by the second element of key tuple (e.g., Type is second element for {global, service, cache_1}).
 %%
 %% Parameters:
-%%   Type - first element of key tuple (e.g., service, resource)
+%%   Type - second element of key tuple (e.g., service, resource)
 %%   PropertyName - atom, name of the property
 %%   PropertyValue - value to match
 %%
@@ -669,8 +676,8 @@ find_by_property(Type, PropertyName, PropertyValue) ->
 	Keys = ets:match_object(?PROPERTY_INDEX_TABLE, {{property, PropertyName, PropertyValue}, '$1'}),
 	lists:filtermap(fun({{property, _, _}, Key}) ->
 		case ets:lookup(?REGISTRY_TABLE, Key) of
-			[{RegKey, _, _} = Entry] ->
-				case is_tuple(RegKey) andalso size(RegKey) >= 1 andalso element(1, RegKey) =:= Type of
+				[{RegKey, _, _} = Entry] ->
+					case is_tuple(RegKey) andalso size(RegKey) >= 2 andalso element(2, RegKey) =:= Type of
 					true -> {true, Entry};
 					false -> false
 				end;
@@ -697,27 +704,31 @@ count_by_property(PropertyName, PropertyValue) ->
 %% Returns a map with counts for each unique value of the property.
 %%
 %% Parameters:
-%%   Key - registry key (or '_' to scan all)
+%%   Type - second element of key tuple (e.g., service, resource)
 %%   PropertyName - atom, name of the property
 %%
 %% Returns map like #{value1 => count1, value2 => count2, ...}
 %%
 %% Examples:
 %%
-%% %% Get distribution of regions for all resources
-%% orca:property_stats(resource, region).
+%% %% Get distribution of regions for all services
+%% orca:property_stats(service, region).
 %% Result: #{"us-west" => 3, "us-east" => 2, "eu-central" => 1}
 %%
-%% %% Get distribution of capacities
-%% orca:property_stats(service, capacity).
+%% %% Get distribution of capacities for all resources
+%% orca:property_stats(resource, capacity).
 %% Result: #{100 => 2, 150 => 3, 200 => 1}
-property_stats(PropertyName, _) ->
+property_stats(Type, PropertyName) ->
 	%% Get all property index entries for this property name
-	Entries = ets:match_object(?PROPERTY_INDEX_TABLE, {{property, PropertyName, '$1'}, '_'}),
+	Entries = ets:match_object(?PROPERTY_INDEX_TABLE, {{property, PropertyName, '$1'}, '$2'}),
 	%% Count by value
-	lists:foldl(fun({{property, _, Value}, _}, Acc) ->
-		maps:update_with(Value, fun(Count) -> Count + 1 end, 1, Acc)
-	end, maps:new(), Entries).
+	lists:foldl(fun({{property, _, Value}, Key}, Acc) ->
+		case ets:lookup(?REGISTRY_TABLE, Key) of
+            [{RegKey, _Pid, _Meta}] when is_tuple(RegKey), size(RegKey) >= 2, element(2, RegKey) =:= Type ->
+				maps:update_with(Value, fun(Count) -> Count + 1 end, 1, Acc);
+			_ -> Acc
+		end
+	end, #{}, Entries).
 
 %%====================================================================
 %% gen_server callbacks
@@ -772,7 +783,7 @@ handle_call({register, Key, Pid, Metadata}, _From, {PidSingleton, PidKeyMap, Sub
 
 %% @doc Handle batch registration - all or nothing
 handle_call({register_batch, Registrations}, _From, State) ->
-	register_batch_entries(Registrations, State, [], []);
+	register_batch_entries(Registrations, State, State, [], [], []);
 
 %% @doc Handle unregistration requests
 handle_call({unregister, Key}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
@@ -873,6 +884,8 @@ handle_call({register_property, Key, Pid, PropName, PropValue}, _From, {PidSingl
 	case ets:lookup(?REGISTRY_TABLE, Key) of
 		[{Key, RegisteredPid, _Metadata}] when RegisteredPid =:= Pid ->
 			%% Key exists and Pid matches, add property to index
+			%% First remove any existing property with the same name
+			ets:match_delete(?PROPERTY_INDEX_TABLE, {{property, PropName, '_'}, Key}),
 			ets:insert(?PROPERTY_INDEX_TABLE, {{property, PropName, PropValue}, Key}),
 			{reply, ok, {PidSingleton, PidKeyMap, Subscribers}};
 		[] ->
@@ -946,20 +959,16 @@ handle_call({register_single, Key, Pid, Metadata}, _From, {PidSingleton, PidKeyM
 			%% Pid already registered as singleton
 			case ExistingKey =:= Key of
 				true ->
-					%% Re-registering under the same key (idempotent) - allow it
-					case ets:lookup(?REGISTRY_TABLE, Key) of
-						[Entry] -> 
-							%% Update the entry with new metadata and return it
-							{reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers}};
-						[] ->
-							%% Key not in ETS (shouldn't happen), re-register
-							case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
-								{reply, {ok, Entry}, State} ->
-									{reply, {ok, Entry}, State};
-								Other ->
-									{reply, Other, {PidSingleton, PidKeyMap, Subscribers}}
-							end
-					end;
+					%% Re-registering under the same key - update metadata
+					ets:insert(?REGISTRY_TABLE, {Key, Pid, Metadata}),
+					%% Clear existing tags and add new ones
+					ets:match_delete(?TAG_INDEX_TABLE, {'_', Key}),
+					Tags = maps:get(tags, Metadata, []),
+					lists:foreach(fun(Tag) ->
+						ets:insert(?TAG_INDEX_TABLE, {{tag, Tag}, Key})
+					end, Tags),
+					UpdatedEntry = {Key, Pid, Metadata},
+					{reply, {ok, UpdatedEntry}, {PidSingleton, PidKeyMap, Subscribers}};
 				false ->
 					%% Trying to register under a different key
 					{reply, {error, {already_registered_under_key, ExistingKey}}, {PidSingleton, PidKeyMap, Subscribers}}
@@ -1072,6 +1081,9 @@ do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) ->
     Entry = {Key, Pid, Metadata},
     ets:insert(?REGISTRY_TABLE, Entry),
     
+    %% Clear existing tags for this key from tag index
+    ets:match_delete(?TAG_INDEX_TABLE, {'_', Key}),
+    
     %% Add tags to tag index
     Tags = maps:get(tags, Metadata, []),
     lists:foreach(fun(Tag) ->
@@ -1104,6 +1116,9 @@ do_register_sync(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) ->
     %% Insert new entry into ETS
     Entry = {Key, Pid, Metadata},
     ets:insert(?REGISTRY_TABLE, Entry),
+    
+    %% Clear existing tags for this key from tag index
+    ets:match_delete(?TAG_INDEX_TABLE, {'_', Key}),
     
     %% Add tags to tag index
     Tags = maps:get(tags, Metadata, []),
@@ -1164,11 +1179,11 @@ notify_subscribers(Key, Entry, Subscribers) ->
 	end.
 
 %% @doc Helper for batch registration
-register_batch_entries([], State, Entries, _FailedKeys) ->
+register_batch_entries([], State, _PrevState, Entries, _NewEntries, _FailedKeys) ->
 	%% All succeeded
 	{reply, {ok, lists:reverse(Entries)}, State};
 
-register_batch_entries([Reg | Rest], {PidSingleton, PidKeyMap, Subscribers} = State, Entries, FailedKeys) ->
+register_batch_entries([Reg | Rest], {PidSingleton, PidKeyMap, Subscribers} = State, PrevState, Entries, NewEntries, FailedKeys) ->
 	%% Parse registration tuple - can be {Key, Metadata} or {Key, Pid, Metadata}
 	{Key, Pid, Metadata} = case Reg of
 		{K, M} -> {K, self(), M};
@@ -1181,29 +1196,29 @@ register_batch_entries([Reg | Rest], {PidSingleton, PidKeyMap, Subscribers} = St
 			%% Key not registered, register it
 			case do_register_sync(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
 				{ok, Entry, NewState} ->
-					register_batch_entries(Rest, NewState, [Entry | Entries], FailedKeys);
+					register_batch_entries(Rest, NewState, PrevState, [Entry | Entries], [Entry | NewEntries], FailedKeys);
 				{error, Reason} ->
 					%% Rollback: unregister all successful ones
-					rollback_batch(Entries, {PidSingleton, PidKeyMap, Subscribers}),
+					rollback_batch(NewEntries, {PidSingleton, PidKeyMap, Subscribers}),
 					AllFailed = [Key | FailedKeys],
-					{reply, {error, {Reason, AllFailed, Entries}}, {PidSingleton, PidKeyMap, Subscribers}}
+					{reply, {error, {Reason, AllFailed, Entries}}, PrevState}
 			end;
 		[{Key, ExistingPid, _} = Entry] ->
 			%% Key already exists, check if process is alive
 			case is_process_alive(ExistingPid) of
 				true ->
 					%% Process is alive - return existing entry and continue
-					register_batch_entries(Rest, State, [Entry | Entries], FailedKeys);
+					register_batch_entries(Rest, State, PrevState, [Entry | Entries], NewEntries, FailedKeys);
 				false ->
 					%% Process is dead, clean up and re-register
 					NewState = remove_dead_pid_entries(ExistingPid, State),
 					case do_register_sync(Key, Pid, Metadata, NewState) of
 						{ok, Entry, NewState2} ->
-							register_batch_entries(Rest, NewState2, [Entry | Entries], FailedKeys);
+							register_batch_entries(Rest, NewState2, PrevState, [Entry | Entries], [Entry | NewEntries], FailedKeys);
 						{error, Reason} ->
-							rollback_batch(Entries, State),
+							rollback_batch(NewEntries, State),
 							AllFailed = [Key | FailedKeys],
-							{reply, {error, {Reason, AllFailed, Entries}}, State}
+							{reply, {error, {Reason, AllFailed, Entries}}, PrevState}
 					end
 			end
 	end.

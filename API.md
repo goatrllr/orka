@@ -479,25 +479,25 @@ WestCount = orca:count_by_property(region, "us-west"),
 io:format("~w services in us-west~n", [WestCount]).
 ```
 
-#### `property_stats(PropertyName, _) -> #{Value => Count}`
+#### `property_stats(Type, PropertyName) -> #{Value => Count}`
 
-Get distribution statistics for a property.
+Get distribution statistics for a property, filtered by type.
 
 ```erlang
-%% Get all regions and their counts
-RegionStats = orca:property_stats(region, _),
+%% Get region distribution for all services
+RegionStats = orca:property_stats(service, region),
 %% Result: #{"us-west" => 3, "us-east" => 2, "eu-central" => 1}
 
-%% Get capacity distribution
-CapacityStats = orca:property_stats(capacity, _),
+%% Get capacity distribution for all resources
+CapacityStats = orca:property_stats(resource, capacity),
 %% Result: #{100 => 2, 150 => 3, 200 => 1}
 ```
 
 **Use cases**:
-- Geographic load balancing
-- Health monitoring by region
-- Resource pool distribution
-- Feature flag queries
+- Geographic load balancing by service type
+- Health monitoring by region for specific types
+- Resource pool distribution analysis
+- Feature flag queries per type
 - Capacity planning
 
 ---
@@ -680,7 +680,7 @@ check_system_health() ->
 
 %% Geo-distribution check
 check_geo_distribution() ->
-    RegionStats = orca:property_stats(region, _),
+    RegionStats = orca:property_stats(service, region),
     io:format("Services by region: ~p~n", [RegionStats]).
 ```
 

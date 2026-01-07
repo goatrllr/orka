@@ -461,7 +461,7 @@ test_property_stats(Config) ->
 	ok = orca:register_property(Key4, Pid4, #{property => capacity, value => 200}),
 	
 	%% Get property statistics
-	Stats = orca:property_stats(instance, capacity),
+Stats = orca:property_stats(instance, capacity),
 	
 	%% Verify distribution
 	#{ 100 := Count100, 150 := Count150, 200 := Count200 } = Stats,

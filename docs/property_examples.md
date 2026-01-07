@@ -25,7 +25,7 @@ orca:find_by_property(Type, PropertyName, PropertyValue).
 orca:count_by_property(PropertyName, PropertyValue).
 
 %% Get distribution of values for a property
-orca:property_stats(PropertyName, IgnoredArg).
+orca:property_stats(Type, PropertyName).
 ```
 
 ---
@@ -66,7 +66,7 @@ orca:find_by_property(service, capacity, 150).
 %% Result: [{{global, service, translator_2}, <0.234.0>, {...}}]
 
 %% Get capacity distribution
-orca:property_stats(capacity, service).
+orca:property_stats(service, capacity).
 %% Result: #{100 => 1, 150 => 1, 80 => 1}
 
 %% Count instances with specific capacity
@@ -139,7 +139,7 @@ orca:find_by_property(resource, region, "us-west").
 %% ]
 
 %% Count replicas per region
-orca:property_stats(region, resource).
+orca:property_stats(resource, region).
 %% Result: #{"us-west" => 2, "us-east" => 1, "eu-central" => 1}
 
 %% Count replicas in east
@@ -212,7 +212,7 @@ orca:register_property({global, worker, w1}, WorkerPid1,
 
 ```erlang
 %% Get health distribution
-orca:property_stats(health, worker).
+orca:property_stats(worker, health).
 %% Result: #{ok => 1, warning => 1, degraded => 1}
 
 %% Count healthy workers
@@ -229,7 +229,7 @@ orca:find_by_property(worker, health, degraded).
 ```erlang
 %% Dashboard query: health summary
 get_health_summary() ->
-    Stats = orca:property_stats(health, worker),
+    Stats = orca:property_stats(worker, health),
     TotalWorkers = orca:count_by_tag(worker),
     HealthyWorkers = maps:get(ok, Stats, 0),
     WarningWorkers = maps:get(warning, Stats, 0),
@@ -289,7 +289,7 @@ orca:register_property({global, service, api_v3}, ApiPidV3,
 
 ```erlang
 %% Find all API versions
-orca:property_stats(api_version, service).
+orca:property_stats(service, api_version).
 %% Result: #{"1.0.0" => 1, "2.0.0" => 1, "3.0.0" => 1}
 
 %% Find instances supporting streaming
@@ -389,7 +389,7 @@ orca:find_by_property(device_type, mobile).
 %% ]
 
 %% Get device distribution across all sessions
-orca:property_stats(device_type, session).
+orca:property_stats(session, device_type).
 %% Result: #{web => 1, mobile => 2, desktop => 1}
 ```
 
@@ -458,7 +458,7 @@ orca:find_by_property(pool, active_connections, 45).
 %% Result: [{{global, pool, db_pool_1}, <0.310.0>, {...}}]
 
 %% Get distribution of max connections across pools
-orca:property_stats(max_connections, pool).
+orca:property_stats(pool, max_connections).
 %% Result: #{100 => 1, 150 => 1, 75 => 1}
 
 %% Find pools with specific capacity
