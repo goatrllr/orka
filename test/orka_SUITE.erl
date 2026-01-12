@@ -1,4 +1,4 @@
--module(orca_SUITE).
+-module(orka_SUITE).
 
 %% Callbacks
 -export([all/0, init_per_suite/1, end_per_suite/1]).
@@ -129,22 +129,22 @@ all() ->
 	].
 
 init_per_suite(Config) ->
-	%% Start the orca application (will be restarted per test)
-	application:stop(orca),
+	%% Start the orka application (will be restarted per test)
+	application:stop(orka),
 	timer:sleep(50),
-	ok = application:start(orca),
+	ok = application:start(orka),
 	timer:sleep(100),
 	Config.
 
 end_per_suite(_Config) ->
-	application:stop(orca),
+	application:stop(orka),
 	ok.
 
 init_per_testcase(_TestCase, Config) ->
 	%% Restart application to reset all state cleanly
-	catch application:stop(orca),
+	catch application:stop(orka),
 	timer:sleep(100),
-	ok = application:start(orca),
+	ok = application:start(orka),
 	timer:sleep(100),
 	Config.
 
@@ -161,9 +161,9 @@ test_register_and_lookup(Config) ->
 	Pid = spawn(fun() -> timer:sleep(10000) end),
 	Metadata = #{status => active, version => 1},
 
-	{ok, _} = orca:register(Key, Pid, Metadata),
+	{ok, _} = orka:register(Key, Pid, Metadata),
 
-	{ok, {Key, Pid, Metadata}} = orca:lookup(Key),
+	{ok, {Key, Pid, Metadata}} = orka:lookup(Key),
 
 	ct:log("✓ Successfully registered and looked up entry"),
 	Config.
@@ -171,8 +171,8 @@ test_register_and_lookup(Config) ->
 %% @doc Test register/3 invalid input returns badarg
 test_register_badarg(Config) ->
 	Key = {global, bad, input},
-	{error, badarg} = orca:register(Key, not_a_pid, #{}),
-	{error, badarg} = orca:register(Key, self(), not_a_map),
+	{error, badarg} = orka:register(Key, not_a_pid, #{}),
+	{error, badarg} = orka:register(Key, self(), not_a_map),
 	Config.
 
 %% @doc Test registration with explicit Pid (supervisor registration)
@@ -181,9 +181,9 @@ test_register_with_pid(Config) ->
 	Pid = spawn(fun() -> timer:sleep(10000) end),
 	Metadata = #{role => worker},
 
-	{ok, _} = orca:register(Key, Pid, Metadata),
+	{ok, _} = orka:register(Key, Pid, Metadata),
 
-	{ok, {Key, Pid, Metadata}} = orca:lookup(Key),
+	{ok, {Key, Pid, Metadata}} = orka:lookup(Key),
 
 	ct:log("✓ Supervisor-style registration works"),
 	Config.
@@ -193,10 +193,10 @@ test_self_register(Config) ->
 	Key = {global, user3, service_c},
 	Metadata = #{auto_register => true},
 
-	{ok, {Key, Self, Metadata}} = orca:register(Key, Metadata),
+	{ok, {Key, Self, Metadata}} = orka:register(Key, Metadata),
 	Self = self(),
 
-	{ok, {Key, Self, Metadata}} = orca:lookup(Key),
+	{ok, {Key, Self, Metadata}} = orka:lookup(Key),
 	Self = self(),
 
 	ct:log("✓ Self-registration works"),
@@ -206,7 +206,7 @@ test_self_register(Config) ->
 test_lookup_not_found(Config) ->
 	Key = {global, user_nonexistent, service},
 
-	not_found = orca:lookup(Key),
+	not_found = orka:lookup(Key),
 
 	ct:log("✓ Lookup returns not_found for missing key"),
 	Config.
@@ -217,12 +217,12 @@ test_unregister(Config) ->
 	Pid = spawn(fun() -> timer:sleep(10000) end),
 	Metadata = #{temp => true},
 
-	{ok, _} = orca:register(Key, Pid, Metadata),
-	{ok, _} = orca:lookup(Key),
+	{ok, _} = orka:register(Key, Pid, Metadata),
+	{ok, _} = orka:lookup(Key),
 
-	ok = orca:unregister(Key),
+	ok = orka:unregister(Key),
 
-	not_found = orca:lookup(Key),
+	not_found = orka:lookup(Key),
 
 	ct:log("✓ Unregister removes entry from registry"),
 	Config.
@@ -231,7 +231,7 @@ test_unregister(Config) ->
 test_unregister_not_found(Config) ->
 	Key = {global, user_nonexistent, service},
 
-	not_found = orca:unregister(Key),
+	not_found = orka:unregister(Key),
 
 	ct:log("✓ Unregister returns not_found for missing key"),
 	Config.
@@ -244,15 +244,15 @@ test_unregister_batch(Config) ->
 	Pid1 = spawn(fun() -> timer:sleep(10000) end),
 	Pid2 = spawn(fun() -> timer:sleep(10000) end),
 
-	{ok, _} = orca:register(Key1, Pid1, #{batch => true}),
-	{ok, _} = orca:register(Key2, Pid2, #{batch => true}),
+	{ok, _} = orka:register(Key1, Pid1, #{batch => true}),
+	{ok, _} = orka:register(Key2, Pid2, #{batch => true}),
 
-	{ok, {RemovedKeys, NotFoundKeys}} = orca:unregister_batch([Key1, Key2, Key3]),
+	{ok, {RemovedKeys, NotFoundKeys}} = orka:unregister_batch([Key1, Key2, Key3]),
 	[Key1, Key2] = RemovedKeys,
 	[Key3] = NotFoundKeys,
 
-	not_found = orca:lookup(Key1),
-	not_found = orca:lookup(Key2),
+	not_found = orka:lookup(Key1),
+	not_found = orka:lookup(Key2),
 
 	ct:log("✓ Batch unregister removes existing keys and reports missing keys"),
 	Config.
@@ -267,11 +267,11 @@ test_lookup_all(Config) ->
 	Pid2 = spawn(fun() -> timer:sleep(10000) end),
 	Pid3 = spawn(fun() -> timer:sleep(10000) end),
 
-	{ok, _} = orca:register(Key1, Pid1, #{id => 1}),
-	{ok, _} = orca:register(Key2, Pid2, #{id => 2}),
-	{ok, _} = orca:register(Key3, Pid3, #{id => 3}),
+	{ok, _} = orka:register(Key1, Pid1, #{id => 1}),
+	{ok, _} = orka:register(Key2, Pid2, #{id => 2}),
+	{ok, _} = orka:register(Key3, Pid3, #{id => 3}),
 
-	AllEntries = orca:lookup_all(),
+	AllEntries = orka:lookup_all(),
 
 	3 = length(AllEntries),
 	true = lists:member({Key1, Pid1, #{id => 1}}, AllEntries),
@@ -287,14 +287,14 @@ test_process_cleanup_on_exit(Config) ->
 	Pid = spawn(fun() -> timer:sleep(50) end),
 	Metadata = #{cleanup_test => true},
 
-	{ok, _} = orca:register(Key, Pid, Metadata),
-	{ok, {Key, Pid, Metadata}} = orca:lookup(Key),
+	{ok, _} = orka:register(Key, Pid, Metadata),
+	{ok, {Key, Pid, Metadata}} = orka:lookup(Key),
 
 	%% Wait for process to exit
 	timer:sleep(200),
 
 	%% Entry should be automatically removed
-	not_found = orca:lookup(Key),
+	not_found = orka:lookup(Key),
 
 	ct:log("✓ Automatic cleanup on process exit works"),
 	Config.
@@ -310,20 +310,20 @@ test_multiple_services_per_user(Config) ->
 	PidB = spawn(fun() -> timer:sleep(10000) end),
 	PidC = spawn(fun() -> timer:sleep(10000) end),
 
-	{ok, _} = orca:register(ServiceA, PidA, #{service => a}),
-	{ok, _} = orca:register(ServiceB, PidB, #{service => b}),
-	{ok, _} = orca:register(ServiceC, PidC, #{service => c}),
+	{ok, _} = orka:register(ServiceA, PidA, #{service => a}),
+	{ok, _} = orka:register(ServiceB, PidB, #{service => b}),
+	{ok, _} = orka:register(ServiceC, PidC, #{service => c}),
 
-	{ok, {ServiceA, PidA, _}} = orca:lookup(ServiceA),
-	{ok, {ServiceB, PidB, _}} = orca:lookup(ServiceB),
-	{ok, {ServiceC, PidC, _}} = orca:lookup(ServiceC),
+	{ok, {ServiceA, PidA, _}} = orka:lookup(ServiceA),
+	{ok, {ServiceB, PidB, _}} = orka:lookup(ServiceB),
+	{ok, {ServiceC, PidC, _}} = orka:lookup(ServiceC),
 
 	%% Unregister one service, others should remain
-	ok = orca:unregister(ServiceB),
+	ok = orka:unregister(ServiceB),
 
-	{ok, {ServiceA, PidA, _}} = orca:lookup(ServiceA),
-	not_found = orca:lookup(ServiceB),
-	{ok, {ServiceC, PidC, _}} = orca:lookup(ServiceC),
+	{ok, {ServiceA, PidA, _}} = orka:lookup(ServiceA),
+	not_found = orka:lookup(ServiceB),
+	{ok, {ServiceC, PidC, _}} = orka:lookup(ServiceC),
 
 	ct:log("✓ Multiple services per user work independently"),
 	Config.
@@ -338,9 +338,9 @@ test_nested_keys(Config) ->
 	Pid = spawn(fun() -> timer:sleep(10000) end),
 	Metadata = #{language => french},
 
-	{ok, _} = orca:register(Key, Pid, Metadata),
+	{ok, _} = orka:register(Key, Pid, Metadata),
 
-	{ok, {Key, Pid, Metadata}} = orca:lookup(Key),
+	{ok, {Key, Pid, Metadata}} = orka:lookup(Key),
 
 	ct:log("✓ Nested keys work correctly"),
 	Config.
@@ -352,15 +352,15 @@ test_re_register_same_key(Config) ->
 	Pid2 = spawn(fun() -> timer:sleep(10000) end),
 
 	%% First registration with Pid1
-	{ok, {Key, Pid1, #{version := 1}}} = orca:register(Key, Pid1, #{version => 1}),
-	{ok, {Key, Pid1, #{version := 1}}} = orca:lookup(Key),
+	{ok, {Key, Pid1, #{version := 1}}} = orka:register(Key, Pid1, #{version => 1}),
+	{ok, {Key, Pid1, #{version := 1}}} = orka:lookup(Key),
 
 	%% Try to re-register same key with different Pid2 - should return existing registration
-	{ok, {Key, Pid1, #{version := 1}}} = orca:register(Key, Pid2, #{version => 2}),
-	{ok, {Key, Pid1, #{version := 1}}} = orca:lookup(Key),
+	{ok, {Key, Pid1, #{version := 1}}} = orka:register(Key, Pid2, #{version => 2}),
+	{ok, {Key, Pid1, #{version := 1}}} = orka:lookup(Key),
 
 	%% Verify only one entry exists for this key
-	AllEntries = orca:lookup_all(),
+	AllEntries = orka:lookup_all(),
 	Matches = [E || E <- AllEntries, element(1, E) =:= Key],
 	1 = length(Matches),
 
@@ -380,9 +380,9 @@ test_metadata_preservation(Config) ->
 		tuple => {x, y, z}
 	},
 
-	{ok, _} = orca:register(Key, Pid, Metadata),
+	{ok, _} = orka:register(Key, Pid, Metadata),
 
-	{ok, {Key, Pid, RetrievedMetadata}} = orca:lookup(Key),
+	{ok, {Key, Pid, RetrievedMetadata}} = orka:lookup(Key),
 
 	Metadata = RetrievedMetadata,
 
@@ -395,15 +395,15 @@ test_add_tag_idempotent(Config) ->
 	Pid = spawn(fun() -> timer:sleep(10000) end),
 	Metadata = #{tags => [service]},
 
-	{ok, _} = orca:register(Key, Pid, Metadata),
-	ok = orca:add_tag(Key, critical),
-	ok = orca:add_tag(Key, critical),
+	{ok, _} = orka:register(Key, Pid, Metadata),
+	ok = orka:add_tag(Key, critical),
+	ok = orka:add_tag(Key, critical),
 
-	{ok, {Key, _Pid, LookupMeta}} = orca:lookup(Key),
+	{ok, {Key, _Pid, LookupMeta}} = orka:lookup(Key),
 	Tags = maps:get(tags, LookupMeta, []),
 	1 = length([Tag || Tag <- Tags, Tag =:= critical]),
 
-	Entries = orca:entries_by_tag(critical),
+	Entries = orka:entries_by_tag(critical),
 	1 = length(Entries),
 
 	ct:log("✓ add_tag/2 is idempotent"),
@@ -411,21 +411,21 @@ test_add_tag_idempotent(Config) ->
 
 %% @doc Test register_batch/1 invalid input returns badarg
 test_register_batch_invalid_input(Config) ->
-	{error, badarg} = orca:register_batch([{invalid}]),
-	{error, badarg} = orca:register_batch([{global, service, bad}, self(), not_a_map]),
-	{error, badarg} = orca:register_batch([{global, service, bad}, not_a_pid, #{}]),
+	{error, badarg} = orka:register_batch([{invalid}]),
+	{error, badarg} = orka:register_batch([{global, service, bad}, self(), not_a_map]),
+	{error, badarg} = orka:register_batch([{global, service, bad}, not_a_pid, #{}]),
 	Config.
 
 %% @doc Test register_property/3 invalid input returns badarg
 test_register_property_badarg(Config) ->
 	Key = {global, service, bad_property},
-	{error, badarg} = orca:register_property(Key, not_a_pid, #{property => region, value => "us-west"}),
+	{error, badarg} = orka:register_property(Key, not_a_pid, #{property => region, value => "us-west"}),
 	Config.
 
 %% @doc Test update_metadata/2 invalid input returns badarg
 test_update_metadata_badarg(Config) ->
 	Key = {global, service, bad_metadata},
-	{error, badarg} = orca:update_metadata(Key, not_a_map),
+	{error, badarg} = orka:update_metadata(Key, not_a_map),
 	Config.
 
 %% @doc Test property registration
@@ -437,18 +437,18 @@ test_register_property(Config) ->
 	Pid2 = spawn(fun() -> timer:sleep(10000) end),
 	
 	%% Register services with properties
-	{ok, _} = orca:register(Key1, Pid1, #{tags => [service, online]}),
-	{ok, _} = orca:register(Key2, Pid2, #{tags => [service, online]}),
+	{ok, _} = orka:register(Key1, Pid1, #{tags => [service, online]}),
+	{ok, _} = orka:register(Key2, Pid2, #{tags => [service, online]}),
 	
 	%% Add property to first service
-	ok = orca:register_property(Key1, Pid1, #{property => capacity, value => 100}),
+	ok = orka:register_property(Key1, Pid1, #{property => capacity, value => 100}),
 	
 	%% Add property to second service
-	ok = orca:register_property(Key2, Pid2, #{property => capacity, value => 150}),
+	ok = orka:register_property(Key2, Pid2, #{property => capacity, value => 150}),
 	
 	%% Test registering property for non-existent key returns not_found
 	NonexistentKey = {global, service, nonexistent},
-	not_found = orca:register_property(NonexistentKey, self(), 
+	not_found = orka:register_property(NonexistentKey, self(), 
 		#{property => capacity, value => 200}),
 	
 	ct:log("✓ Property registration works correctly"),
@@ -466,22 +466,22 @@ test_find_by_property(Config) ->
 	Pid3 = spawn(fun() -> timer:sleep(10000) end),
 	
 	%% Register with region properties
-	{ok, _} = orca:register(Key1, Pid1, #{tags => [db]}),
-	ok = orca:register_property(Key1, Pid1, #{property => region, value => "us-west"}),
+	{ok, _} = orka:register(Key1, Pid1, #{tags => [db]}),
+	ok = orka:register_property(Key1, Pid1, #{property => region, value => "us-west"}),
 	
-	{ok, _} = orca:register(Key2, Pid2, #{tags => [db]}),
-	ok = orca:register_property(Key2, Pid2, #{property => region, value => "us-west"}),
+	{ok, _} = orka:register(Key2, Pid2, #{tags => [db]}),
+	ok = orka:register_property(Key2, Pid2, #{property => region, value => "us-west"}),
 	
-	{ok, _} = orca:register(Key3, Pid3, #{tags => [db]}),
-	ok = orca:register_property(Key3, Pid3, #{property => region, value => "us-east"}),
+	{ok, _} = orka:register(Key3, Pid3, #{tags => [db]}),
+	ok = orka:register_property(Key3, Pid3, #{property => region, value => "us-east"}),
 	
 	%% Find by property value
-	WestEntries = orca:find_by_property(region, "us-west"),
+	WestEntries = orka:find_by_property(region, "us-west"),
 	2 = length(WestEntries),
 	true = lists:any(fun({K, _, _}) -> K =:= Key1 end, WestEntries),
 	true = lists:any(fun({K, _, _}) -> K =:= Key2 end, WestEntries),
 	
-	EastEntries = orca:find_by_property(region, "us-east"),
+	EastEntries = orka:find_by_property(region, "us-east"),
 	1 = length(EastEntries),
 	true = lists:any(fun({K, _, _}) -> K =:= Key3 end, EastEntries),
 	
@@ -497,19 +497,19 @@ test_find_by_property_with_type(Config) ->
 	Pid2 = spawn(fun() -> timer:sleep(10000) end),
 	
 	%% Register service and resource with same property
-	{ok, _} = orca:register(Key1, Pid1, #{tags => [cache]}),
-	ok = orca:register_property(Key1, Pid1, #{property => status, value => "healthy"}),
+	{ok, _} = orka:register(Key1, Pid1, #{tags => [cache]}),
+	ok = orka:register_property(Key1, Pid1, #{property => status, value => "healthy"}),
 	
-	{ok, _} = orca:register(Key2, Pid2, #{tags => [db]}),
-	ok = orca:register_property(Key2, Pid2, #{property => status, value => "healthy"}),
+	{ok, _} = orka:register(Key2, Pid2, #{tags => [db]}),
+	ok = orka:register_property(Key2, Pid2, #{property => status, value => "healthy"}),
 	
 	%% Find only services with status healthy
-	ServiceEntries = orca:find_by_property(service, status, "healthy"),
+	ServiceEntries = orka:find_by_property(service, status, "healthy"),
 	1 = length(ServiceEntries),
 	true = lists:any(fun({K, _, _}) -> K =:= Key1 end, ServiceEntries),
 	
 	%% Find only resources with status healthy
-	ResourceEntries = orca:find_by_property(resource, status, "healthy"),
+	ResourceEntries = orka:find_by_property(resource, status, "healthy"),
 	1 = length(ResourceEntries),
 	true = lists:any(fun({K, _, _}) -> K =:= Key2 end, ResourceEntries),
 	
@@ -528,21 +528,21 @@ test_count_by_property(Config) ->
 	Pid3 = spawn(fun() -> timer:sleep(10000) end),
 	
 	%% Register workers with health status
-	{ok, _} = orca:register(Key1, Pid1, #{tags => [worker]}),
-	ok = orca:register_property(Key1, Pid1, #{property => health, value => ok}),
+	{ok, _} = orka:register(Key1, Pid1, #{tags => [worker]}),
+	ok = orka:register_property(Key1, Pid1, #{property => health, value => ok}),
 	
-	{ok, _} = orca:register(Key2, Pid2, #{tags => [worker]}),
-	ok = orca:register_property(Key2, Pid2, #{property => health, value => ok}),
+	{ok, _} = orka:register(Key2, Pid2, #{tags => [worker]}),
+	ok = orka:register_property(Key2, Pid2, #{property => health, value => ok}),
 	
-	{ok, _} = orca:register(Key3, Pid3, #{tags => [worker]}),
-	ok = orca:register_property(Key3, Pid3, #{property => health, value => warning}),
+	{ok, _} = orka:register(Key3, Pid3, #{tags => [worker]}),
+	ok = orka:register_property(Key3, Pid3, #{property => health, value => warning}),
 	
 	%% Count healthy workers
-	HealthyCount = orca:count_by_property(health, ok),
+	HealthyCount = orka:count_by_property(health, ok),
 	2 = HealthyCount,
 	
 	%% Count warning workers
-	WarningCount = orca:count_by_property(health, warning),
+	WarningCount = orka:count_by_property(health, warning),
 	1 = WarningCount,
 	
 	ct:log("✓ Counting by property works correctly"),
@@ -563,20 +563,20 @@ test_property_stats(Config) ->
 	Pid4 = spawn(fun() -> timer:sleep(10000) end),
 	
 	%% Register instances with different capacities
-	{ok, _} = orca:register(Key1, Pid1, #{tags => [instance]}),
-	ok = orca:register_property(Key1, Pid1, #{property => capacity, value => 100}),
+	{ok, _} = orka:register(Key1, Pid1, #{tags => [instance]}),
+	ok = orka:register_property(Key1, Pid1, #{property => capacity, value => 100}),
 	
-	{ok, _} = orca:register(Key2, Pid2, #{tags => [instance]}),
-	ok = orca:register_property(Key2, Pid2, #{property => capacity, value => 100}),
+	{ok, _} = orka:register(Key2, Pid2, #{tags => [instance]}),
+	ok = orka:register_property(Key2, Pid2, #{property => capacity, value => 100}),
 	
-	{ok, _} = orca:register(Key3, Pid3, #{tags => [instance]}),
-	ok = orca:register_property(Key3, Pid3, #{property => capacity, value => 150}),
+	{ok, _} = orka:register(Key3, Pid3, #{tags => [instance]}),
+	ok = orka:register_property(Key3, Pid3, #{property => capacity, value => 150}),
 	
-	{ok, _} = orca:register(Key4, Pid4, #{tags => [instance]}),
-	ok = orca:register_property(Key4, Pid4, #{property => capacity, value => 200}),
+	{ok, _} = orka:register(Key4, Pid4, #{tags => [instance]}),
+	ok = orka:register_property(Key4, Pid4, #{property => capacity, value => 200}),
 	
 	%% Get property statistics
-	Stats = orca:property_stats(instance, capacity),
+	Stats = orka:property_stats(instance, capacity),
 	
 	%% Verify distribution
 	#{ 100 := Count100, 150 := Count150, 200 := Count200 } = Stats,
@@ -589,38 +589,38 @@ test_property_stats(Config) ->
 
 %% @doc Test property_stats/2 returns empty map when no matches
 test_property_stats_empty(Config) ->
-	Stats = orca:property_stats(service, region),
+	Stats = orka:property_stats(service, region),
 	#{} = Stats,
 	ct:log("✓ property_stats/2 returns empty map when no matches"),
 	Config.
 
 %% @doc Test find_by_property/2 returns empty list when no matches
 test_find_by_property_not_found(Config) ->
-	[] = orca:find_by_property(region, "nope"),
+	[] = orka:find_by_property(region, "nope"),
 	ct:log("✓ find_by_property/2 returns empty list when no matches"),
 	Config.
 
 %% @doc Test count_by_property/2 returns 0 when no matches
 test_count_by_property_not_found(Config) ->
-	0 = orca:count_by_property(region, "nope"),
+	0 = orka:count_by_property(region, "nope"),
 	ct:log("✓ count_by_property/2 returns 0 when no matches"),
 	Config.
 
 %% @doc Test entries_by_tag/1 returns empty list when no matches
 test_entries_by_tag_not_found(Config) ->
-	[] = orca:entries_by_tag(nonexistent_tag),
+	[] = orka:entries_by_tag(nonexistent_tag),
 	ct:log("✓ entries_by_tag/1 returns empty list when no matches"),
 	Config.
 
 %% @doc Test count_by_tag/1 returns 0 when no matches
 test_count_by_tag_not_found(Config) ->
-	0 = orca:count_by_tag(nonexistent_tag),
+	0 = orka:count_by_tag(nonexistent_tag),
 	ct:log("✓ count_by_tag/1 returns 0 when no matches"),
 	Config.
 
 %% @doc Test entries_by_type/1 returns empty list when no matches
 test_entries_by_type_not_found(Config) ->
-	[] = orca:entries_by_type(nonexistent_type),
+	[] = orka:entries_by_type(nonexistent_type),
 	ct:log("✓ entries_by_type/1 returns empty list when no matches"),
 	Config.
 
@@ -630,10 +630,10 @@ test_register_with(Config) ->
 	Metadata = #{tags => [service, test], properties => #{version => "1.0.0"}},
 	
 	%% Start and register a process in one call
-	{ok, Pid} = orca:register_with(Key, Metadata, {erlang, spawn, [fun() -> timer:sleep(10000) end]}),
+	{ok, Pid} = orka:register_with(Key, Metadata, {erlang, spawn, [fun() -> timer:sleep(10000) end]}),
 	
 	%% Verify the process is registered
-	{ok, {Key, Pid, RetrievedMeta}} = orca:lookup(Key),
+	{ok, {Key, Pid, RetrievedMeta}} = orka:lookup(Key),
 	NormalizedMeta = normalize_tags(Metadata),
 	NormalizedMeta = normalize_tags(RetrievedMeta),
 	
@@ -641,7 +641,7 @@ test_register_with(Config) ->
 	true = is_process_alive(Pid),
 	
 	%% Verify it appears in lookup_all
-	AllEntries = orca:lookup_all(),
+	AllEntries = orka:lookup_all(),
 	true = lists:any(fun({K, P, _}) -> K =:= Key andalso P =:= Pid end, AllEntries),
 	
 	ct:log("✓ register_with/3 starts and registers process atomically"),
@@ -653,13 +653,13 @@ test_register_with_existing_returns_entry(Config) ->
 	Metadata = #{tags => [service, existing]},
 	Pid = spawn(fun() -> timer:sleep(10000) end),
 
-	{ok, {Key, Pid, _}} = orca:register(Key, Pid, Metadata),
+	{ok, {Key, Pid, _}} = orka:register(Key, Pid, Metadata),
 	{ok, {Key, Pid, EntryMeta}} =
-		orca:register_with(Key, #{tags => [service, ignored]}, {erlang, spawn, [fun() -> timer:sleep(10000) end]}),
+		orka:register_with(Key, #{tags => [service, ignored]}, {erlang, spawn, [fun() -> timer:sleep(10000) end]}),
 
 	NormalizedMeta = normalize_tags(Metadata),
 	NormalizedMeta = normalize_tags(EntryMeta),
-	{ok, {Key, Pid, LookupMeta}} = orca:lookup(Key),
+	{ok, {Key, Pid, LookupMeta}} = orka:lookup(Key),
 	NormalizedMeta = normalize_tags(Metadata),
 	NormalizedMeta = normalize_tags(LookupMeta),
 
@@ -673,29 +673,29 @@ test_register_with_failure(Config) ->
 	
 	%% Try to register with an MFA that fails
 	FailingMFA = {erlang, apply, [fun() -> error(test_error) end, []]},
-	Result = orca:register_with(Key, Metadata, FailingMFA),
+	Result = orka:register_with(Key, Metadata, FailingMFA),
 	
 	%% Should return an error
 	{error, _} = Result,
 	
 	%% Verify the key was not registered
-	not_found = orca:lookup(Key),
+	not_found = orka:lookup(Key),
 	
 	ct:log("✓ register_with/3 handles MFA failures correctly"),
 	Config.
 
 %% @doc Test register_with/3 invalid input returns badarg
 test_register_with_badarg(Config) ->
-	{error, badarg} = orca:register_with({global, service, bad}, not_a_map, {erlang, spawn, [fun() -> ok end]}),
-	{error, badarg} = orca:register_with({global, service, bad}, #{}, not_an_mfa),
+	{error, badarg} = orka:register_with({global, service, bad}, not_a_map, {erlang, spawn, [fun() -> ok end]}),
+	{error, badarg} = orka:register_with({global, service, bad}, #{}, not_an_mfa),
 	Config.
 
 %% @doc Test register_with/3 succeeds with duplicate tags (normalized metadata)
 test_register_with_duplicate_tags(Config) ->
 	Key = {global, service, dup_tags},
 	Metadata = #{tags => [service, service, online]},
-	{ok, Pid} = orca:register_with(Key, Metadata, {erlang, spawn, [fun() -> timer:sleep(10000) end]}),
-	{ok, {Key, Pid, StoredMeta}} = orca:lookup(Key),
+	{ok, Pid} = orka:register_with(Key, Metadata, {erlang, spawn, [fun() -> timer:sleep(10000) end]}),
+	{ok, {Key, Pid, StoredMeta}} = orka:lookup(Key),
 	NormalizedMeta = normalize_tags(Metadata),
 	NormalizedMeta = normalize_tags(StoredMeta),
 	Config.
@@ -706,12 +706,12 @@ test_register_single(Config) ->
 	Metadata = #{tags => [service, config, critical], properties => #{reload_interval => 30000}},
 	
 	%% Register as singleton
-	{ok, {Key, Pid, RegMetadata}} = orca:register_single(Key, Metadata),
+	{ok, {Key, Pid, RegMetadata}} = orka:register_single(Key, Metadata),
 	NormalizedMeta = normalize_tags(Metadata),
 	NormalizedMeta = normalize_tags(RegMetadata),
 	
 	%% Verify it's registered
-	{ok, {Key, Pid, LookupMetadata}} = orca:lookup(Key),
+	{ok, {Key, Pid, LookupMetadata}} = orka:lookup(Key),
 	NormalizedMeta = normalize_tags(Metadata),
 	NormalizedMeta = normalize_tags(LookupMetadata),
 	
@@ -727,11 +727,11 @@ test_register_single_same_key_returns_existing(Config) ->
 	Metadata = #{tags => [service, config]},
 	Metadata2 = #{tags => [service, config, updated]},
 
-	{ok, {Key, Pid, Meta1}} = orca:register_single(Key, Metadata),
-	{ok, {Key, Pid, Meta2}} = orca:register_single(Key, Pid, Metadata2),
+	{ok, {Key, Pid, Meta1}} = orka:register_single(Key, Metadata),
+	{ok, {Key, Pid, Meta2}} = orka:register_single(Key, Pid, Metadata2),
 	NormalizedMeta = normalize_tags(Meta1),
 	NormalizedMeta = normalize_tags(Meta2),
-	{ok, {Key, Pid, LookupMeta}} = orca:lookup(Key),
+	{ok, {Key, Pid, LookupMeta}} = orka:lookup(Key),
 	NormalizedMeta = normalize_tags(Meta1),
 	NormalizedMeta = normalize_tags(LookupMeta),
 	Config.
@@ -743,27 +743,27 @@ test_register_single_constraint(Config) ->
 	Metadata = #{tags => [service, locks, critical]},
 	
 	%% Register first key as singleton
-	{ok, {Key1, Pid, _}} = orca:register_single(Key1, Metadata),
+	{ok, {Key1, Pid, _}} = orka:register_single(Key1, Metadata),
 	
 	%% Verify it's registered
-	{ok, {Key1, Pid, _}} = orca:lookup(Key1),
+	{ok, {Key1, Pid, _}} = orka:lookup(Key1),
 	
 	%% Try to register the same process under a different key - should return error
-	{error, {already_registered_under_key, Key1}} = orca:register_single(Key2, Pid, Metadata),
+	{error, {already_registered_under_key, Key1}} = orka:register_single(Key2, Pid, Metadata),
 	
 	%% Verify the second key is not registered
-	not_found = orca:lookup(Key2),
+	not_found = orka:lookup(Key2),
 	
 	%% Verify the first key still exists
-	{ok, {Key1, Pid, _}} = orca:lookup(Key1),
+	{ok, {Key1, Pid, _}} = orka:lookup(Key1),
 	
 	ct:log("✓ register_single/3 errors for singleton Pid under another key"),
 	Config.
 
 %% @doc Test register_single/3 invalid input returns badarg
 test_register_single_badarg(Config) ->
-	{error, badarg} = orca:register_single({global, service, bad}, not_a_pid, #{}),
-	{error, badarg} = orca:register_single({global, service, bad}, self(), not_a_map),
+	{error, badarg} = orka:register_single({global, service, bad}, not_a_pid, #{}),
+	{error, badarg} = orka:register_single({global, service, bad}, self(), not_a_map),
 	Config.
 
 %% @doc Test await when key is already registered
@@ -772,13 +772,13 @@ test_await_already_registered(Config) ->
 	Metadata = #{tags => [service, database, critical]},
 	
 	%% Register the key first
-	{ok, {Key, Pid, RegMetadata}} = orca:register(Key, Metadata),
+	{ok, {Key, Pid, RegMetadata}} = orka:register(Key, Metadata),
 	NormalizedMeta = normalize_tags(Metadata),
 	NormalizedMeta = normalize_tags(RegMetadata),
 	
 	%% Now await should return immediately
 	Start = erlang:monotonic_time(millisecond),
-	{ok, {Key, Pid, AwaitMetadata}} = orca:await(Key, 30000),
+	{ok, {Key, Pid, AwaitMetadata}} = orka:await(Key, 30000),
 	NormalizedMeta = normalize_tags(Metadata),
 	NormalizedMeta = normalize_tags(AwaitMetadata),
 	Elapsed = erlang:monotonic_time(millisecond) - Start,
@@ -796,10 +796,10 @@ test_await_timeout_zero_no_dangling_subscriber(Config) ->
 	Pid = spawn(fun() -> timer:sleep(10000) end),
 
 	Awaiter = spawn(fun() ->
-		Result = orca:await(Key, 0),
+		Result = orka:await(Key, 0),
 		Parent ! {await_result, Result},
 		receive
-			{orca_registered, Key, _Entry} ->
+			{orka_registered, Key, _Entry} ->
 				Parent ! {unexpected_registered, Key}
 		after 200 ->
 			Parent ! {no_unexpected_registration, Key}
@@ -812,7 +812,7 @@ test_await_timeout_zero_no_dangling_subscriber(Config) ->
 		ct:fail(timeout_waiting_for_await_result)
 	end,
 
-	{ok, _} = orca:register(Key, Pid, #{}),
+	{ok, _} = orka:register(Key, Pid, #{}),
 
 	receive
 		{unexpected_registered, Key} ->
@@ -824,7 +824,7 @@ test_await_timeout_zero_no_dangling_subscriber(Config) ->
 	end,
 
 	_ = erlang:exit(Awaiter, kill),
-	ok = orca:unregister(Key),
+	ok = orka:unregister(Key),
 	ct:log("✓ await/2 with Timeout=0 does not leave subscribers behind"),
 	Config.
 
@@ -834,7 +834,7 @@ test_await_timeout(Config) ->
 	
 	%% Await with short timeout
 	Start = erlang:monotonic_time(millisecond),
-	{error, timeout} = orca:await(Key, 100),
+	{error, timeout} = orka:await(Key, 100),
 	Elapsed = erlang:monotonic_time(millisecond) - Start,
 	
 	%% Should take roughly the timeout duration
@@ -851,7 +851,7 @@ test_await_registration(Config) ->
 	%% Start a process that will register after a delay
 	TestPid = self(),
 	AwaitPid = spawn(fun() ->
-		Result = orca:await(Key, 5000),
+		Result = orka:await(Key, 5000),
 		TestPid ! {await_result, Result}
 	end),
 	
@@ -862,7 +862,7 @@ test_await_registration(Config) ->
 	timer:sleep(100),
 	
 	%% Now register the key
-	{ok, {Key, RegisteredPid, RegMetadata}} = orca:register(Key, Metadata),
+	{ok, {Key, RegisteredPid, RegMetadata}} = orka:register(Key, Metadata),
 	NormalizedMeta = normalize_tags(Metadata),
 	NormalizedMeta = normalize_tags(RegMetadata),
 	
@@ -883,15 +883,15 @@ test_subscribe_already_registered(Config) ->
 	Metadata = #{tags => [service, config, critical]},
 	
 	%% Register the key first
-	{ok, {Key, Pid, RegMetadata}} = orca:register(Key, Metadata),
+	{ok, {Key, Pid, RegMetadata}} = orka:register(Key, Metadata),
 	NormalizedMeta = normalize_tags(Metadata),
 	NormalizedMeta = normalize_tags(RegMetadata),
 	
 	%% Subscribe should send notification immediately
-	ok = orca:subscribe(Key),
+	ok = orka:subscribe(Key),
 	
 	%% Should receive message immediately
-	{orca_registered, Key, {Key, Pid, SubMetadata}} = receive_timeout(500),
+	{orka_registered, Key, {Key, Pid, SubMetadata}} = receive_timeout(500),
 	NormalizedMeta = normalize_tags(Metadata),
 	NormalizedMeta = normalize_tags(SubMetadata),
 	
@@ -904,22 +904,22 @@ test_subscribe_and_registration(Config) ->
 	Metadata = #{tags => [service, metrics]},
 	
 	%% Subscribe first
-	ok = orca:subscribe(Key),
+	ok = orka:subscribe(Key),
 	
 	%% Key doesn't exist yet
-	not_found = orca:lookup(Key),
+	not_found = orka:lookup(Key),
 	
 	%% Start a process that will register
 	RegisterPid = spawn(fun() ->
 		timer:sleep(100),
-		orca:register(Key, Metadata)
+		orka:register(Key, Metadata)
 	end),
 	
 	%% Monitor to detect process failure
 	MonitorRef = monitor(process, RegisterPid),
 	
 	%% Wait for notification - should be registered by the spawned RegisterPid
-	{orca_registered, Key, {Key, RegisterPid, SubMetadata}} = receive_timeout(2000),
+	{orka_registered, Key, {Key, RegisterPid, SubMetadata}} = receive_timeout(2000),
 	NormalizedMeta = normalize_tags(Metadata),
 	NormalizedMeta = normalize_tags(SubMetadata),
 	
@@ -935,13 +935,13 @@ test_unsubscribe(Config) ->
 	Metadata = #{tags => [service, feature]},
 	
 	%% Subscribe first
-	ok = orca:subscribe(Key),
+	ok = orka:subscribe(Key),
 	
 	%% Unsubscribe
-	ok = orca:unsubscribe(Key),
+	ok = orka:unsubscribe(Key),
 	
 	%% Register the key - should NOT receive notification
-	{ok, {Key, _Pid, RegMetadata}} = orca:register(Key, Metadata),
+	{ok, {Key, _Pid, RegMetadata}} = orka:register(Key, Metadata),
 	NormalizedMeta = normalize_tags(Metadata),
 	NormalizedMeta = normalize_tags(RegMetadata),
 	
@@ -958,27 +958,27 @@ test_concurrent_subscribers(Config) ->
 	
 	%% Have multiple subscribers
 	Sub1 = spawn(fun() ->
-		ok = orca:subscribe(Key),
-		{orca_registered, Key, SubscriberEntry} = receive_timeout(5000),
+		ok = orka:subscribe(Key),
+		{orka_registered, Key, SubscriberEntry} = receive_timeout(5000),
 		self() ! {got_notification, SubscriberEntry}
 	end),
 	
 	Sub2 = spawn(fun() ->
-		ok = orca:subscribe(Key),
-		{orca_registered, Key, SubscriberEntry} = receive_timeout(5000),
+		ok = orka:subscribe(Key),
+		{orka_registered, Key, SubscriberEntry} = receive_timeout(5000),
 		self() ! {got_notification, SubscriberEntry}
 	end),
 	
 	Sub3 = spawn(fun() ->
-		ok = orca:subscribe(Key),
-		{orca_registered, Key, SubscriberEntry} = receive_timeout(5000),
+		ok = orka:subscribe(Key),
+		{orka_registered, Key, SubscriberEntry} = receive_timeout(5000),
 		self() ! {got_notification, SubscriberEntry}
 	end),
 	
 	timer:sleep(100),
 	
 	%% Register the key and capture the entry
-	{ok, RegisteredEntry} = orca:register(Key, Metadata),
+	{ok, RegisteredEntry} = orka:register(Key, Metadata),
 	
 	%% All subscribers should receive the same entry
 	wait_for_pids([Sub1, Sub2, Sub3], 3000),
@@ -1004,7 +1004,7 @@ test_register_batch_basic(Config) ->
 	Meta3 = #{tags => [orders, user], properties => #{queue => 100}},
 	
 	%% Register 3 services for user in one call
-	{ok, Entries} = orca:register_batch([
+	{ok, Entries} = orka:register_batch([
 		{Key1, P1, Meta1},
 		{Key2, P2, Meta2},
 		{Key3, P3, Meta3}
@@ -1014,9 +1014,9 @@ test_register_batch_basic(Config) ->
 	3 = length(Entries),
 	
 	%% Each should be found
-	{ok, {Key1, P1, Meta1}} = orca:lookup(Key1),
-	{ok, {Key2, P2, Meta2}} = orca:lookup(Key2),
-	{ok, {Key3, P3, Meta3}} = orca:lookup(Key3),
+	{ok, {Key1, P1, Meta1}} = orka:lookup(Key1),
+	{ok, {Key2, P2, Meta2}} = orka:lookup(Key2),
+	{ok, {Key3, P3, Meta3}} = orka:lookup(Key3),
 	
 	ct:log("✓ Batch registration with explicit pids works"),
 	Config.
@@ -1034,7 +1034,7 @@ test_register_batch_with_explicit_pids(Config) ->
 	Meta = #{tags => [worker, job]},
 	
 	%% Register all with explicit pids
-	{ok, Entries} = orca:register_batch([
+	{ok, Entries} = orka:register_batch([
 		{Key1, P1, Meta},
 		{Key2, P2, Meta},
 		{Key3, P3, Meta}
@@ -1044,9 +1044,9 @@ test_register_batch_with_explicit_pids(Config) ->
 	3 = length(Entries),
 	
 	%% Verify Pids match
-	{ok, {Key1, P1, _}} = orca:lookup(Key1),
-	{ok, {Key2, P2, _}} = orca:lookup(Key2),
-	{ok, {Key3, P3, _}} = orca:lookup(Key3),
+	{ok, {Key1, P1, _}} = orka:lookup(Key1),
+	{ok, {Key2, P2, _}} = orka:lookup(Key2),
+	{ok, {Key3, P3, _}} = orka:lookup(Key3),
 	
 	%% Cleanup
 	lists:foreach(fun(P) -> P ! stop end, Pids),
@@ -1075,7 +1075,7 @@ test_register_batch_per_user(Config) ->
 	end, Services),
 	
 	%% Register all in one batch
-	{ok, Entries} = orca:register_batch(RegList),
+	{ok, Entries} = orka:register_batch(RegList),
 	
 	%% Should get 5 entries
 	5 = length(Entries),
@@ -1083,11 +1083,11 @@ test_register_batch_per_user(Config) ->
 	%% Verify all are registered
 	lists:foreach(fun({Service, _Meta}) ->
 		Key = {global, Service, UserId},
-		{ok, {Key, _Pid, _}} = orca:lookup(Key)
+		{ok, {Key, _Pid, _}} = orka:lookup(Key)
 	end, Services),
 	
 	%% Query by user - should find all 5
-	AllEntries = orca:lookup_all(),
+	AllEntries = orka:lookup_all(),
 	UserEntries = [E || E <- AllEntries, begin
 		K = element(1, E),
 		case K of
@@ -1106,9 +1106,9 @@ test_register_batch_existing_entry(Config) ->
 	Pid1 = spawn(fun() -> timer:sleep(10000) end),
 	Pid2 = spawn(fun() -> timer:sleep(10000) end),
 
-	{ok, {Key, Pid1, _}} = orca:register(Key, Pid1, #{tags => [service]}),
-	{ok, [{Key, Pid1, _}]} = orca:register_batch([{Key, Pid2, #{tags => [service]}}]),
-	{ok, {Key, Pid1, _}} = orca:lookup(Key),
+	{ok, {Key, Pid1, _}} = orka:register(Key, Pid1, #{tags => [service]}),
+	{ok, [{Key, Pid1, _}]} = orka:register_batch([{Key, Pid2, #{tags => [service]}}]),
+	{ok, {Key, Pid1, _}} = orka:lookup(Key),
 	Config.
 
 %% @doc Test register_batch_with/1 starts and registers processes
@@ -1117,13 +1117,13 @@ test_register_batch_with_basic(Config) ->
 	Key2 = {global, service, batch_with_2},
 	Metadata = #{tags => [service]},
 
-	{ok, Entries} = orca:register_batch_with([
+	{ok, Entries} = orka:register_batch_with([
 		{Key1, Metadata, {erlang, spawn, [fun() -> timer:sleep(10000) end]}},
 		{Key2, Metadata, {erlang, spawn, [fun() -> timer:sleep(10000) end]}}
 	]),
 	2 = length(Entries),
-	{ok, {Key1, Pid1, _}} = orca:lookup(Key1),
-	{ok, {Key2, Pid2, _}} = orca:lookup(Key2),
+	{ok, {Key1, Pid1, _}} = orka:lookup(Key1),
+	{ok, {Key2, Pid2, _}} = orka:lookup(Key2),
 	true = is_process_alive(Pid1),
 	true = is_process_alive(Pid2),
 	Config.
@@ -1135,19 +1135,19 @@ test_register_batch_with_failure(Config) ->
 	Metadata = #{tags => [service]},
 	FailingMFA = {erlang, apply, [fun() -> error(test_error) end, []]},
 
-	{error, {_Reason, _Failed, _Entries}} = orca:register_batch_with([
+	{error, {_Reason, _Failed, _Entries}} = orka:register_batch_with([
 		{Key1, Metadata, {erlang, spawn, [fun() -> timer:sleep(10000) end]}},
 		{Key2, Metadata, FailingMFA}
 	]),
-	not_found = orca:lookup(Key1),
-	not_found = orca:lookup(Key2),
+	not_found = orka:lookup(Key1),
+	not_found = orka:lookup(Key2),
 	Config.
 
 %% @doc Test register_batch_with/1 invalid input returns badarg
 test_register_batch_with_badarg(Config) ->
-	{error, badarg} = orca:register_batch_with([{invalid}]),
-	{error, badarg} = orca:register_batch_with([{key, #{}, not_an_mfa}]),
-	{error, badarg} = orca:register_batch_with([{key, not_a_map, {erlang, spawn, []}}]),
+	{error, badarg} = orka:register_batch_with([{invalid}]),
+	{error, badarg} = orka:register_batch_with([{key, #{}, not_an_mfa}]),
+	{error, badarg} = orka:register_batch_with([{key, not_a_map, {erlang, spawn, []}}]),
 	Config.
 
 %% @doc Test unregister removes monitor for pid
@@ -1155,11 +1155,11 @@ test_unregister_removes_monitor(Config) ->
 	Key = {global, service, monitor_cleanup},
 	Pid = spawn(fun() -> receive after 10000 -> ok end end),
 
-	{ok, _} = orca:register(Key, Pid, #{tags => [service]}),
+	{ok, _} = orka:register(Key, Pid, #{tags => [service]}),
 	Monitors1 = get_monitors(),
 	true = lists:member({process, Pid}, Monitors1),
 
-	ok = orca:unregister(Key),
+	ok = orka:unregister(Key),
 	Monitors2 = get_monitors(),
 	false = lists:member({process, Pid}, Monitors2),
 	Config.
@@ -1172,11 +1172,11 @@ test_register_batch_rollback_removes_monitor(Config) ->
 	Pid1 = spawn(fun() -> receive after 10000 -> ok end end),
 	Pid2 = spawn(fun() -> receive after 10000 -> ok end end),
 
-	{ok, _} = orca:register_single(Key2, Pid2, #{tags => [service]}),
+	{ok, _} = orka:register_single(Key2, Pid2, #{tags => [service]}),
 	{error, {_, _Failed, _Entries}} =
-		orca:register_batch([{Key1, Pid1, #{tags => [service]}}, {Key3, Pid2, #{tags => [service]}}]),
+		orka:register_batch([{Key1, Pid1, #{tags => [service]}}, {Key3, Pid2, #{tags => [service]}}]),
 
-	not_found = orca:lookup(Key1),
+	not_found = orka:lookup(Key1),
 	Monitors = get_monitors(),
 	false = lists:member({process, Pid1}, Monitors),
 	Config.
@@ -1196,7 +1196,7 @@ normalize_tags(Metadata) ->
 	end.
 
 get_monitors() ->
-	case process_info(whereis(orca), monitors) of
+	case process_info(whereis(orka), monitors) of
 		{monitors, Monitors} -> Monitors;
 		_ -> []
 	end.

@@ -1,4 +1,4 @@
--module(orca).
+-module(orka).
 -behaviour(gen_server).
 
 %% API
@@ -29,9 +29,9 @@
 -include_lib("stdlib/include/ms_transform.hrl").
 -compile({parse_transform, ms_transform}).
 
--define(REGISTRY_TABLE, orca_table).
--define(TAG_INDEX_TABLE, orca_tag_index).
--define(PROPERTY_INDEX_TABLE, orca_property_index).
+-define(REGISTRY_TABLE, orka_table).
+-define(TAG_INDEX_TABLE, orka_tag_index).
+-define(PROPERTY_INDEX_TABLE, orka_property_index).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Suggested Key & Metadata Format
@@ -70,7 +70,7 @@
 % Usage Examples
 
 % User registration (self-register)
-% orca:register({global, user, "mark@example.com"}, #{
+% orka:register({global, user, "mark@example.com"}, #{
 %     tags => [user, online, authenticated, premium],
 %     properties => #{
 %         region => "us-west",
@@ -80,7 +80,7 @@
 % }).
 
 % Service registration (supervisor registers)
-% orca:register({global, service, translator}, ServicePid, #{
+% orka:register({global, service, translator}, ServicePid, #{
 %     tags => [service, translator, critical, multilingual],
 %     properties => #{
 %         version => "2.1.0",
@@ -91,7 +91,7 @@
 % }).
 
 % Resource tracking
-% orca:register({global, resource, {db, primary}}, DbPid, #{
+% orka:register({global, resource, {db, primary}}, DbPid, #{
 %     tags => [resource, database, critical, replicated],
 %     properties => #{
 %         pool_size => 50,
@@ -102,7 +102,7 @@
 % }).
 
 % Worker pool registration
-% orca:register({global, worker, image_processor_1}, WorkerPid, #{
+% orka:register({global, worker, image_processor_1}, WorkerPid, #{
 %     tags => [worker, image_processing, gpu_enabled],
 %     properties => #{
 %         capabilities => [resize, filter, compress],
@@ -157,7 +157,7 @@ register(_Key, _Pid, _Metadata) ->
 %% Examples:
 %%
 %% %% Start and register a translator service
-%% orca:register_with(
+%% orka:register_with(
 %%     {global, service, translator},
 %%     #{tags => [service, translator, online],
 %%       properties => #{version => "2.1.0", capacity => 100}},
@@ -165,7 +165,7 @@ register(_Key, _Pid, _Metadata) ->
 %% ).
 %%
 %% %% Start and register a user session
-%% orca:register_with(
+%% orka:register_with(
 %%     {global, user, "alice@example.com"},
 %%     #{tags => [user, online],
 %%       properties => #{region => "us-west"}},
@@ -173,7 +173,7 @@ register(_Key, _Pid, _Metadata) ->
 %% ).
 %%
 %% %% Start and register a database connection pool
-%% orca:register_with(
+%% orka:register_with(
 %%     {global, resource, db_pool_primary},
 %%     #{tags => [resource, database, pool],
 %%       properties => #{max_connections => 100, active => 0}},
@@ -214,14 +214,14 @@ register_with(_Key, _Metadata, _MFA) ->
 %% Examples:
 %%
 %% %% Register config server as singleton
-%% orca:register_single(
+%% orka:register_single(
 %%     {global, service, config_server},
 %%     #{tags => [service, config, critical],
 %%       properties => #{reload_interval => 30000}}
 %% ).
 %%
 %% %% Attempting to register same process under different key returns an error
-%% orca:register_single(
+%% orka:register_single(
 %%     {global, service, app_config},
 %%     ConfigPid,
 %%     #{tags => [service, config]}
@@ -255,7 +255,7 @@ register_single(_Key, _Pid, _Metadata) ->
 %% %% Register 5 processes for a user (from supervisor)
 %% UserId = user123,
 %% {ok, [PortfolioEntry, TechnicalEntry, FundamentalEntry, OrdersEntry, RiskEntry]} =
-%%     orca:register_batch([
+%%     orka:register_batch([
 %%         {{global, portfolio, UserId}, Pid1, #{tags => [portfolio, user], properties => #{strategy => momentum}}},
 %%         {{global, technical, UserId}, Pid2, #{tags => [technical, user], properties => #{indicators => [rsi, macd]}}},
 %%         {{global, fundamental, UserId}, Pid3, #{tags => [fundamental, user], properties => #{sectors => [tech, finance]}}},
@@ -329,7 +329,7 @@ unregister_batch(_Keys) ->
 %% Examples:
 %%
 %% %% Wait up to 30 seconds for database service to start
-%% case orca:await({global, service, database}, 30000) of
+%% case orka:await({global, service, database}, 30000) of
 %%     {ok, {_Key, DbPid, _Meta}} -> 
 %%         io:format("Database ready: ~p~n", [DbPid]);
 %%     {error, timeout} -> 
@@ -338,7 +338,7 @@ unregister_batch(_Keys) ->
 %%
 %% %% Multi-service startup coordination
 %% init([]) ->
-%%     case orca:await({global, service, database}, 30000) of
+%%     case orka:await({global, service, database}, 30000) of
 %%         {ok, {_K, DbPid, _Meta}} -> 
 %%             {ok, #state{db = DbPid}};
 %%         {error, timeout} -> 
@@ -354,10 +354,10 @@ await(Key, Timeout) ->
 		_ ->
 	%% Subscribe to the key
 		gen_server:call(?MODULE, {subscribe_await, Key, self(), Timeout}),
-		%% Wait for notification (either {orca_registered, Key, Entry} or timeout)
+		%% Wait for notification (either {orka_registered, Key, Entry} or timeout)
 		receive
-			{orca_registered, Key, Entry} -> {ok, Entry};
-			{orca_await_timeout, Key} -> 
+			{orka_registered, Key, Entry} -> {ok, Entry};
+			{orka_await_timeout, Key} -> 
 				gen_server:call(?MODULE, {unsubscribe, Key, self()}),	
 				{error, timeout}
 		after Timeout ->
@@ -365,7 +365,7 @@ await(Key, Timeout) ->
 				gen_server:call(?MODULE, {unsubscribe, Key, self()}),
 				%% Drain any pending timeout message from the subscription timer.
 				receive
-					{orca_await_timeout, Key} -> ok
+					{orka_await_timeout, Key} -> ok
 				after 0 -> ok
 				end,
 				{error, timeout}
@@ -375,7 +375,7 @@ await(Key, Timeout) ->
 %% @doc Subscribe to notifications when a key is registered.
 %% 
 %% Non-blocking subscription. The caller will receive a message of the form:
-%%   {orca_registered, Key, {Key, Pid, Metadata}}
+%%   {orka_registered, Key, {Key, Pid, Metadata}}
 %% when the key is registered (either immediately if already registered, or when 
 %% it is subsequently registered).
 %%
@@ -388,17 +388,17 @@ await(Key, Timeout) ->
 %%
 %% %% Subscribe to optional feature
 %% init([]) ->
-%%     orca:subscribe({global, service, cache}),
+%%     orka:subscribe({global, service, cache}),
 %%     {ok, #state{cache_ready = false}}.
 %%
 %% %% Handle notification when cache appears
-%% handle_info({orca_registered, _Key, {_K, CachePid, _Meta}}, State) ->
+%% handle_info({orka_registered, _Key, {_K, CachePid, _Meta}}, State) ->
 %%     {noreply, State#state{cache_ready = true, cache = CachePid}}.
 %%
 %% %% Multiple optional dependencies
 %% init([]) ->
-%%     orca:subscribe({global, service, cache}),
-%%     orca:subscribe({global, service, metrics}),
+%%     orka:subscribe({global, service, cache}),
+%%     orka:subscribe({global, service, metrics}),
 %%     {ok, #state{services = #{}}}.
 subscribe(Key) ->
 	gen_server:call(?MODULE, {subscribe, Key, self()}).
@@ -412,7 +412,7 @@ subscribe(Key) ->
 %%
 %% %% Unsubscribe when feature is no longer needed
 %% handle_cast({disable_cache}, State) ->
-%%     orca:unsubscribe({global, service, cache}),
+%%     orka:unsubscribe({global, service, cache}),
 %%     {noreply, State#state{cache_ready = false}}.
 unsubscribe(Key) ->
 	gen_server:call(?MODULE, {unsubscribe, Key, self()}).
@@ -466,14 +466,14 @@ update_metadata(_Key, _NewMetadata) ->
 %% Examples:
 %%
 %% %% Register some services
-%% orca:register({global, service, translator}, TranslatorPid, #{
+%% orka:register({global, service, translator}, TranslatorPid, #{
 %%     tags => [service, translator, online],
 %%     properties => #{version => "2.1.0", languages => [en, es, fr]},
 %%     created_at => 1703170800000,
 %%     owner => "supervisor_1"
 %% }).
 %%
-%% orca:register({global, service, storage}, StoragePid, #{
+%% orka:register({global, service, storage}, StoragePid, #{
 %%     tags => [service, storage, online],
 %%     properties => #{version => "1.5.0", capacity => 1000},
 %%     created_at => 1703170900000,
@@ -481,7 +481,7 @@ update_metadata(_Key, _NewMetadata) ->
 %% }).
 %%
 %% %% Register a user
-%% orca:register({global, user, "alice@example.com"}, AlicePid, #{
+%% orka:register({global, user, "alice@example.com"}, AlicePid, #{
 %%     tags => [user, online],
 %%     properties => #{region => "us-west"},
 %%     created_at => 1703171000000,
@@ -489,7 +489,7 @@ update_metadata(_Key, _NewMetadata) ->
 %% }).
 %%
 %% %% Find all services
-%% orca:entries_by_type(service).
+%% orka:entries_by_type(service).
 %% Result: [
 %%     {{global, service, translator}, <0.123.0>, #{
 %%         tags => [service, translator, online],
@@ -506,7 +506,7 @@ update_metadata(_Key, _NewMetadata) ->
 %% ]
 %%
 %% %% Find all users
-%% orca:entries_by_type(user).
+%% orka:entries_by_type(user).
 %% Result: [
 %%     {{global, user, "alice@example.com"}, <0.125.0>, #{
 %%         tags => [user, online],
@@ -527,28 +527,28 @@ entries_by_type(Type) ->
 %% Examples:
 %%
 %% %% Register services with various tags
-%% orca:register({global, service, translator}, TranslatorPid, #{
+%% orka:register({global, service, translator}, TranslatorPid, #{
 %%     tags => [service, translator, critical, online],
 %%     properties => #{version => "2.1.0"},
 %%     created_at => 1703170800000,
 %%     owner => "supervisor_1"
 %% }).
 %%
-%% orca:register({global, service, cache}, CachePid, #{
+%% orka:register({global, service, cache}, CachePid, #{
 %%     tags => [service, cache, online],
 %%     properties => #{version => "1.0.0"},
 %%     created_at => 1703170900000,
 %%     owner => "supervisor_1"
 %% }).
 %%
-%% orca:register({global, user, "bob@example.com"}, BobPid, #{
+%% orka:register({global, user, "bob@example.com"}, BobPid, #{
 %%     tags => [user, online],
 %%     properties => #{region => "us-east"},
 %%     created_at => 1703171000000,
 %%     owner => "bob"
 %% }).
 %%
-%% orca:register({global, user, "charlie@example.com"}, CharliePid, #{
+%% orka:register({global, user, "charlie@example.com"}, CharliePid, #{
 %%     tags => [user, offline],
 %%     properties => #{region => "eu-west"},
 %%     created_at => 1703171100000,
@@ -556,7 +556,7 @@ entries_by_type(Type) ->
 %% }).
 %%
 %% %% Find all online processes
-%% orca:entries_by_tag(online).
+%% orka:entries_by_tag(online).
 %% Result: [
 %%     {{global, service, translator}, <0.123.0>, #{
 %%         tags => [service, translator, critical, online],
@@ -579,7 +579,7 @@ entries_by_type(Type) ->
 %% ]
 %%
 %% %% Find all critical processes
-%% orca:entries_by_tag(critical).
+%% orka:entries_by_tag(critical).
 %% Result: [
 %%     {{global, service, translator}, <0.123.0>, #{
 %%         tags => [service, translator, critical, online],
@@ -590,7 +590,7 @@ entries_by_type(Type) ->
 %% ]
 %%
 %% %% Find all offline users
-%% orca:entries_by_tag(offline).
+%% orka:entries_by_tag(offline).
 %% Result: [
 %%     {{global, user, "charlie@example.com"}, <0.126.0>, #{
 %%         tags => [user, offline],
@@ -620,15 +620,15 @@ entries_by_tag(Tag) ->
 %% %% Register multiple services and users (see entries_by_type/1 for setup)
 %%
 %% %% Count total services
-%% orca:count_by_type(service).
+%% orka:count_by_type(service).
 %% Result: 2
 %%
 %% %% Count total users
-%% orca:count_by_type(user).
+%% orka:count_by_type(user).
 %% Result: 1
 %%
 %% %% Count non-existent type
-%% orca:count_by_type(resource).
+%% orka:count_by_type(resource).
 %% Result: 0
 %%
 %% Use cases:
@@ -639,7 +639,7 @@ entries_by_tag(Tag) ->
 %% Example health check:
 %% check_translator_service_health() ->
 %%     MinInstances = 2,
-%%     case orca:count_by_type(service) >= MinInstances of
+%%     case orka:count_by_type(service) >= MinInstances of
 %%         true -> healthy;
 %%         false -> alert_admin()
 %%     end.
@@ -655,19 +655,19 @@ count_by_type(Type) ->
 %% Examples:
 %%
 %% %% Count online processes (see entries_by_tag/1 for setup)
-%% orca:count_by_tag(online).
+%% orka:count_by_tag(online).
 %% Result: 3
 %%
 %% %% Count offline processes
-%% orca:count_by_tag(offline).
+%% orka:count_by_tag(offline).
 %% Result: 1
 %%
 %% %% Count critical processes
-%% orca:count_by_tag(critical).
+%% orka:count_by_tag(critical).
 %% Result: 1
 %%
 %% %% Count processes with a tag that doesn't exist in registry
-%% orca:count_by_tag(maintenance).
+%% orka:count_by_tag(maintenance).
 %% Result: 0
 %%
 %% Use cases:
@@ -679,16 +679,16 @@ count_by_type(Type) ->
 %% Example dashboard query:
 %% get_system_stats() ->
 %%     #{
-%%         total_users => orca:count_by_tag(user),
-%%         online_users => orca:count_by_tag(online),
-%%         offline_users => orca:count_by_tag(offline),
-%%         critical_services => orca:count_by_tag(critical),
-%%         total_services => orca:count_by_type(service)
+%%         total_users => orka:count_by_tag(user),
+%%         online_users => orka:count_by_tag(online),
+%%         offline_users => orka:count_by_tag(offline),
+%%         critical_services => orka:count_by_tag(critical),
+%%         total_services => orka:count_by_type(service)
 %%     }.
 %%
 %% Example alert trigger:
 %% check_service_availability() ->
-%%     AvailableInstances = orca:count_by_tag(online),
+%%     AvailableInstances = orka:count_by_tag(online),
 %%     case AvailableInstances < 2 of
 %%         true -> alert_ops_team("Low service availability!");
 %%         false -> ok
@@ -712,21 +712,21 @@ count_by_tag(Tag) ->
 %% Examples:
 %%
 %% %% Register load balancer instances with capacity
-%% orca:register_property({global, service, translator_1}, TranslatorPid1, 
+%% orka:register_property({global, service, translator_1}, TranslatorPid1, 
 %%     #{property => capacity, value => 100}).
-%% orca:register_property({global, service, translator_2}, TranslatorPid2, 
+%% orka:register_property({global, service, translator_2}, TranslatorPid2, 
 %%     #{property => capacity, value => 150}).
 %%
 %% %% Register database replicas by region
-%% orca:register_property({global, resource, db_1}, DbPid1, 
+%% orka:register_property({global, resource, db_1}, DbPid1, 
 %%     #{property => region, value => "us-west"}).
-%% orca:register_property({global, resource, db_2}, DbPid2, 
+%% orka:register_property({global, resource, db_2}, DbPid2, 
 %%     #{property => region, value => "us-east"}).
 %%
 %% %% Register services with complex configuration
-%% orca:register_property({global, service, api_gateway}, ApiPid,
+%% orka:register_property({global, service, api_gateway}, ApiPid,
 %%     #{property => config, value => #{timeout => 5000, retries => 3}}).
-%% orca:register_property({global, service, worker_pool}, PoolPid,
+%% orka:register_property({global, service, worker_pool}, PoolPid,
 %%     #{property => capabilities, value => [image_resize, compression, filtering]}).
 register_property(Key, Pid, #{property := PropName, value := PropValue}) when is_pid(Pid) ->
 	gen_server:call(?MODULE, {register_property, Key, Pid, PropName, PropValue});
@@ -745,22 +745,22 @@ register_property(_Key, _Pid, _Property) ->
 %% Examples:
 %%
 %% %% Find all services in us-west region
-%% orca:find_by_property(region, "us-west").
+%% orka:find_by_property(region, "us-west").
 %% Result: [
 %%     {{global, resource, db_2}, <0.145.0>, #{region => "us-west", ...}},
 %%     {{global, service, translator}, <0.123.0>, #{region => "us-west", ...}}
 %% ]
 %%
 %% %% Find all translators with capacity over 100
-%% orca:find_by_property(capacity, 150).
+%% orka:find_by_property(capacity, 150).
 %% Result: [{{global, service, translator_2}, <0.124.0>, #{capacity => 150, ...}}]
 %%
 %% %% Find services with specific capabilities
-%% orca:find_by_property(capabilities, [image_resize, compression]).
+%% orka:find_by_property(capabilities, [image_resize, compression]).
 %% Result: [{{global, service, worker_pool}, <0.200.0>, #{capabilities => [image_resize, compression], ...}}]
 %%
 %% %% Find services with specific config
-%% orca:find_by_property(config, #{timeout => 5000, retries => 3}).
+%% orka:find_by_property(config, #{timeout => 5000, retries => 3}).
 %% Result: [{{global, service, api_gateway}, <0.150.0>, #{config => #{timeout => 5000, retries => 3}, ...}}]
 find_by_property(PropertyName, PropertyValue) ->
 	Keys = ets:match_object(?PROPERTY_INDEX_TABLE, {{property, PropertyName, PropertyValue}, '$1'}),
@@ -800,11 +800,11 @@ find_by_property(Type, PropertyName, PropertyValue) ->
 %% Examples:
 %%
 %% %% Count services in production region
-%% orca:count_by_property(region, "production").
+%% orka:count_by_property(region, "production").
 %% Result: 3
 %%
 %% %% Count translators with specific capacity
-%% orca:count_by_property(capacity, 100).
+%% orka:count_by_property(capacity, 100).
 %% Result: 2
 count_by_property(PropertyName, PropertyValue) ->
 	ets:select_count(?PROPERTY_INDEX_TABLE, [{{{property, PropertyName, PropertyValue}, '_'}, [], [true]}]).
@@ -821,19 +821,19 @@ count_by_property(PropertyName, PropertyValue) ->
 %% Examples:
 %%
 %% %% Get distribution of regions for all services
-%% orca:property_stats(service, region).
+%% orka:property_stats(service, region).
 %% Result: #{"us-west" => 3, "us-east" => 2, "eu-central" => 1}
 %%
 %% %% Get distribution of capacities for all resources
-%% orca:property_stats(resource, capacity).
+%% orka:property_stats(resource, capacity).
 %% Result: #{100 => 2, 150 => 3, 200 => 1}
 %%
 %% %% Get distribution of supported languages across services
-%% orca:property_stats(service, languages).
+%% orka:property_stats(service, languages).
 %% Result: {[en, es, fr] => 2, [en, de] => 1, [en, es, fr, de] => 1}
 %%
 %% %% Get distribution of subscription levels for users
-%% orca:property_stats(user, subscription_level).
+%% orka:property_stats(user, subscription_level).
 %% Result: #{gold => 5, silver => 3, bronze => 2}
 property_stats(Type, PropertyName) ->
 	%% Get all property index entries for this property name
@@ -1073,7 +1073,7 @@ handle_call({subscribe_await, Key, CallerPid, Timeout}, _From, {PidSingleton, Pi
 	case ets:lookup(?REGISTRY_TABLE, Key) of
 		[Entry] ->
 			%% Key already registered, send notification immediately
-			CallerPid ! {orca_registered, Key, Entry},
+			CallerPid ! {orka_registered, Key, Entry},
 			{reply, ok, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
 		[] ->
 			%% Key not registered, add to subscribers map with optional timer
@@ -1082,11 +1082,11 @@ handle_call({subscribe_await, Key, CallerPid, Timeout}, _From, {PidSingleton, Pi
 				infinity -> 
 					CallerPid;
 				Ms when Ms > 0 ->
-					TimerRef = erlang:send_after(Ms, CallerPid, {orca_await_timeout, Key}),
+					TimerRef = erlang:send_after(Ms, CallerPid, {orka_await_timeout, Key}),
 					{CallerPid, TimerRef};
 				0 ->
 					%% Timeout of 0 means immediate timeout - send timeout message
-					CallerPid ! {orca_await_timeout, Key},
+					CallerPid ! {orka_await_timeout, Key},
 					CallerPid
 			end,
 			NewSubscribers = maps:put(Key, [SubEntry | SubscribersList], Subscribers),
@@ -1098,7 +1098,7 @@ handle_call({subscribe, Key, CallerPid}, _From, {PidSingleton, PidKeyMap, Subscr
 	case ets:lookup(?REGISTRY_TABLE, Key) of
 		[Entry] ->
 			%% Key already registered, send notification immediately
-			CallerPid ! {orca_registered, Key, Entry},
+			CallerPid ! {orka_registered, Key, Entry},
 			{reply, ok, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
 		[] ->
 			%% Key not registered, add to subscribers map
@@ -1396,10 +1396,10 @@ notify_subscribers(Key, Entry, Subscribers) ->
 			%% Send notification to all subscribers and cancel timers
 			lists:foreach(fun
 				(Pid) when is_pid(Pid) ->
-					Pid ! {orca_registered, Key, Entry};
+					Pid ! {orka_registered, Key, Entry};
 				({Pid, TimerRef}) ->
 					catch erlang:cancel_timer(TimerRef),
-					Pid ! {orca_registered, Key, Entry}
+					Pid ! {orka_registered, Key, Entry}
 			end, SubList),
 			%% Remove this key from subscribers map
 			maps:remove(Key, Subscribers)

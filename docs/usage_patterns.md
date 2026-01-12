@@ -1,12 +1,12 @@
-# Orca Usage Patterns
+# Orka Usage Patterns
 
-This document describes the fundamental patterns for using the orca registry in service-oriented architectures.
+This document describes the fundamental patterns for using the orka registry in service-oriented architectures.
 
 ## Core Philosophy
 
-Orca is a **focused process registry**. Services handle their own startup and dependency injection; orca handles the "where is this process?" question.
+Orka is a **focused process registry**. Services handle their own startup and dependency injection; orka handles the "where is this process?" question.
 
-- ✓ Orca does: Register, lookup, query, cleanup, await
+- ✓ Orka does: Register, lookup, query, cleanup, await
 - ✓ Services do: Startup sequences, lazy-loading, resource injection
 - ✓ Result: Composable, testable, minimal coupling
 
@@ -18,7 +18,7 @@ Orca is a **focused process registry**. Services handle their own startup and de
 %% In supervisor or startup module
 start_service() ->
     {ok, Pid} = service_module:start_link(),
-    orca:register({global, service, my_service}, Pid, #{
+    orka:register({global, service, my_service}, Pid, #{
         tags => [service, critical],
         properties => #{version => "1.0"}
     }),
@@ -27,7 +27,7 @@ start_service() ->
 
 **Benefits**:
 - Simple and explicit
-- Service doesn't know about orca
+- Service doesn't know about orka
 - Easy to test in isolation
 - Supervisor controls registration lifecycle
 
@@ -37,7 +37,7 @@ start_service() ->
 
 start_db() ->
     {ok, DbPid} = db_server:start_link(),
-    orca:register({global, service, database}, DbPid, #{
+    orka:register({global, service, database}, DbPid, #{
         tags => [service, database, critical],
         properties => #{max_connections => 100, pool_type => primary}
     }),
@@ -51,7 +51,7 @@ start_db() ->
 ```erlang
 %% In service init
 init([]) ->
-    orca:register({global, service, my_service}, self(), #{
+    orka:register({global, service, my_service}, self(), #{
         tags => [service, online],
         properties => #{capacity => 100}
     }),
@@ -73,7 +73,7 @@ start_link() ->
     gen_server:start_link({local, cache_server}, ?MODULE, [], []).
 
 init([]) ->
-    orca:register({global, service, cache}, self(), #{
+    orka:register({global, service, cache}, self(), #{
         tags => [service, cache, optional],
         properties => #{
             max_size => 10000,
@@ -89,7 +89,7 @@ init([]) ->
 -module(metrics_server).
 
 init([]) ->
-    orca:register({global, service, metrics}, self(), #{
+    orka:register({global, service, metrics}, self(), #{
         tags => [service, metrics, monitoring],
         properties => #{sample_interval => 5000}
     }),
@@ -103,7 +103,7 @@ init([]) ->
 ```erlang
 %% Supervisor creates user-scoped service
 start_user_session(UserId) ->
-    orca:register_with(
+    orka:register_with(
         {global, user, UserId},
         #{
             tags => [user, online, session],
@@ -125,7 +125,7 @@ start_user_session(UserId) ->
 
 %% Called by web framework
 create_session(UserId) ->
-    case orca:register_with(
+    case orka:register_with(
         {global, user, UserId},
         #{
             tags => [user, session, online],
@@ -142,14 +142,14 @@ create_session(UserId) ->
 
 %% Look up a user's session
 get_session(UserId) ->
-    case orca:lookup({global, user, UserId}) of
+    case orka:lookup({global, user, UserId}) of
         {ok, {_Key, Pid, _Meta}} -> {ok, Pid};
         not_found -> {error, session_not_found}
     end.
 
 %% Find all users in a region
 users_in_region(Region) ->
-    orca:find_by_property(user, region, Region).
+    orka:find_by_property(user, region, Region).
 ```
 
 **Example: Job worker per task**:
@@ -158,7 +158,7 @@ users_in_region(Region) ->
 
 %% Start a worker for a job
 start_job_worker(JobId, Config) ->
-    orca:register_with(
+    orka:register_with(
         {global, job, JobId},
         #{
             tags => [job, worker, processing],
@@ -173,14 +173,14 @@ start_job_worker(JobId, Config) ->
 
 %% Get a job's worker
 get_job(JobId) ->
-    case orca:lookup({global, job, JobId}) of
+    case orka:lookup({global, job, JobId}) of
         {ok, {_Key, Pid, Meta}} -> {ok, Pid, Meta};
         not_found -> {error, job_not_found}
     end.
 
 %% Find all active jobs
 active_jobs() ->
-    orca:find_by_property(job, status, running).
+    orka:find_by_property(job, status, running).
 ```
 
 ## Pattern 4: Singleton Service (Only One Instance)
@@ -190,7 +190,7 @@ active_jobs() ->
 ```erlang
 %% Register as singleton to prevent duplicates
 start_singleton_service() ->
-    orca:register_with(
+    orka:register_with(
         {global, service, database},
         #{tags => [service, database, critical]},
         {db_service, start_link, []}
@@ -202,7 +202,7 @@ Or with explicit singleton constraint:
 ```erlang
 init([]) ->
     %% This will fail if Pid is already registered under a different key
-    case orca:register_single({global, service, config_server}, self(), #{
+    case orka:register_single({global, service, config_server}, self(), #{
         tags => [service, config, critical],
         properties => #{reload_interval => 30000}
     }) of
@@ -224,7 +224,7 @@ init([]) ->
 -module(lock_manager).
 
 init([]) ->
-    case orca:register_single(
+    case orka:register_single(
         {global, service, lock_manager},
         self(),
         #{
@@ -244,7 +244,7 @@ init([]) ->
 -module(config_server).
 
 init([]) ->
-    case orca:register_single(
+    case orka:register_single(
         {global, service, config_server},
         self(),
         #{
@@ -270,7 +270,7 @@ init([]) ->
 ```erlang
 %% Service waits for required dependency
 init([]) ->
-    case orca:await({global, service, database}, 30000) of
+    case orka:await({global, service, database}, 30000) of
         {ok, {_K, DbPid, _Meta}} ->
             {ok, #state{db = DbPid}};
         {error, timeout} ->
@@ -290,7 +290,7 @@ init([]) ->
 -behavior(gen_server).
 
 init([]) ->
-    case orca:await({global, service, database}, 30000) of
+    case orka:await({global, service, database}, 30000) of
         {ok, {_K, DbPid, _Meta}} ->
             {ok, #state{db = DbPid, requests = 0}};
         {error, timeout} ->
@@ -317,11 +317,11 @@ init([]) ->
     end.
 
 await_all_services() ->
-    case orca:await({global, service, database}, 30000) of
+    case orka:await({global, service, database}, 30000) of
         {ok, {_, DbPid, _}} ->
-            case orca:await({global, service, cache}, 20000) of
+            case orka:await({global, service, cache}, 20000) of
                 {ok, {_, CachePid, _}} ->
-                    case orca:await({global, service, queue}, 15000) of
+                    case orka:await({global, service, queue}, 15000) of
                         {ok, {_, QueuePid, _}} ->
                             {ok, #{
                                 db => DbPid,
@@ -346,10 +346,10 @@ await_all_services() ->
 ```erlang
 init([]) ->
     %% Subscribe to optional feature - don't block
-    orca:subscribe({global, service, cache}),
+    orka:subscribe({global, service, cache}),
     {ok, #state{cache = undefined}}.
 
-handle_info({orca_registered, {global, service, cache}, {_K, Pid, _Meta}}, State) ->
+handle_info({orka_registered, {global, service, cache}, {_K, Pid, _Meta}}, State) ->
     io:format("Cache is now available~n", []),
     {noreply, State#state{cache = Pid}}.
 ```
@@ -367,8 +367,8 @@ handle_info({orca_registered, {global, service, cache}, {_K, Pid, _Meta}}, State
 
 init([]) ->
     %% Subscribe to optional features
-    orca:subscribe({global, service, sms_provider}),
-    orca:subscribe({global, service, push_service}),
+    orka:subscribe({global, service, sms_provider}),
+    orka:subscribe({global, service, push_service}),
     
     %% Start immediately without waiting
     {ok, #state{
@@ -378,11 +378,11 @@ init([]) ->
         push_pid = undefined
     }}.
 
-handle_info({orca_registered, {global, service, sms_provider}, {_, Pid, _Meta}}, State) ->
+handle_info({orka_registered, {global, service, sms_provider}, {_, Pid, _Meta}}, State) ->
     io:format("SMS provider available~n", []),
     {noreply, State#state{sms_ready = true, sms_pid = Pid}};
 
-handle_info({orca_registered, {global, service, push_service}, {_, Pid, _Meta}}, State) ->
+handle_info({orka_registered, {global, service, push_service}, {_, Pid, _Meta}}, State) ->
     io:format("Push service available~n", []),
     {noreply, State#state{push_ready = true, push_pid = Pid}};
 
@@ -407,14 +407,14 @@ handle_call({notify, Message}, _From, State) ->
 -module(analytics_server).
 
 init([]) ->
-    orca:subscribe({global, service, analytics_exporter}),
+    orka:subscribe({global, service, analytics_exporter}),
     {ok, #state{
         exporter_ready = false,
         exporter_pid = undefined,
         events = []
     }}.
 
-handle_info({orca_registered, {global, service, analytics_exporter}, {_, Pid, _Meta}}, State) ->
+handle_info({orka_registered, {global, service, analytics_exporter}, {_, Pid, _Meta}}, State) ->
     %% Exporter appeared, send buffered events
     send_buffered_events(State#state.events, Pid),
     {noreply, State#state{exporter_ready = true, exporter_pid = Pid, events = []}}.
@@ -437,15 +437,15 @@ handle_call({log_event, Event}, _From, State) ->
 ```erlang
 %% In service module
 pre_register(ServiceName) ->
-    orca:register({global, service, ServiceName}, self(), #{
+    orka:register({global, service, ServiceName}, self(), #{
         tags => [service, starting],
         properties => #{status => initializing}
     }).
 
 %% Later, when ready, mark as complete
 mark_ready() ->
-    orca:remove_tag({global, service, my_service}, starting),
-    orca:add_tag({global, service, my_service}, ready).
+    orka:remove_tag({global, service, my_service}, starting),
+    orka:add_tag({global, service, my_service}, ready).
 ```
 
 **Benefits**:
@@ -462,7 +462,7 @@ startup() ->
     %% Wait for all services to be ready
     lists:map(fun(Service) ->
         Key = {global, service, Service},
-        case orca:await(Key, 30000) of
+        case orka:await(Key, 30000) of
             {ok, {_K, Pid, Meta}} ->
                 Tags = maps:get(tags, Meta, []),
                 case lists:member(ready, Tags) of
@@ -478,7 +478,7 @@ startup() ->
 ## Decision Tree: Which Pattern?
 
 ```
-Does service know about orca?
+Does service know about orka?
 ├─ No → Pattern 1: Supervisor registers service
 └─ Yes → Service has self-registration
          ├─ Service is singleton?
@@ -513,7 +513,7 @@ Does your service need another service to start?
 ```erlang
 %% Register 5 processes for a user in a single call (explicit Pids)
 UserId = user123,
-{ok, Entries} = orca:register_batch([
+{ok, Entries} = orka:register_batch([
     {{global, portfolio, UserId}, PortfolioPid, #{tags => [portfolio, user], properties => #{strategy => momentum}}},
     {{global, technical, UserId}, TechnicalPid, #{tags => [technical, user], properties => #{indicators => [rsi, macd]}}},
     {{global, fundamental, UserId}, FundamentalPid, #{tags => [fundamental, user], properties => #{sectors => [tech, finance]}}},
@@ -522,7 +522,7 @@ UserId = user123,
 ]).
 
 %% Or start and register in a single call
-{ok, Entries} = orca:register_batch_with([
+{ok, Entries} = orka:register_batch_with([
     {{global, portfolio, UserId}, #{tags => [portfolio, user]}, {portfolio_service, start_link, [UserId]}},
     {{global, technical, UserId}, #{tags => [technical, user]}, {technical_service, start_link, [UserId]}},
     {{global, fundamental, UserId}, #{tags => [fundamental, user]}, {fundamental_service, start_link, [UserId]}},
@@ -564,7 +564,7 @@ init([UserId]) ->
 -behavior(gen_server).
 
 init([UserId]) ->
-    orca:register({global, portfolio, UserId}, self(), #{
+    orka:register({global, portfolio, UserId}, self(), #{
         tags => [portfolio, user],
         properties => #{strategy => momentum, created_at => erlang:system_time(millisecond)}
     }),
@@ -612,7 +612,7 @@ Keys = [
     {global, orders, UserId},
     {global, risk, UserId}
 ],
-{ok, {RemovedKeys, NotFoundKeys}} = orca:unregister_batch(Keys).
+{ok, {RemovedKeys, NotFoundKeys}} = orka:unregister_batch(Keys).
 
 %% RemovedKeys = [all keys that were removed]
 %% NotFoundKeys = [any keys that weren't registered]

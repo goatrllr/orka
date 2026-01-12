@@ -1,10 +1,10 @@
-# Orca vs. Gproc vs. Syn
+# Orka vs. Gproc vs. Syn
 
 Comparison of local process registry implementations.
 
 ## Feature Comparison
 
-| Feature | Orca | Gproc | Syn |
+| Feature | Orka | Gproc | Syn |
 |---------|------|-------|-----|
 | Process Registration | ✓ | ✓ | ✓ |
 | Flexible Keys (any term) | ✓ | ✓ | ✓ |
@@ -21,7 +21,7 @@ Comparison of local process registry implementations.
 
 ## Key Strengths & Weaknesses
 
-### Orca Strengths
+### Orka Strengths
 
 - **Properties System** — Gproc has nothing like this. Store arbitrary values and query them efficiently (e.g., all instances with `capacity => 100`)
 - **Singleton Pattern** — Neither gproc nor syn have this built-in. Prevents accidental duplicates
@@ -31,7 +31,7 @@ Comparison of local process registry implementations.
 
 ### Gproc Strengths
 
-- **Counters** — Built-in counter objects (not in orca or syn)
+- **Counters** — Built-in counter objects (not in orka or syn)
 - **Named Values** — Global shared values with atomic updates
 - **Mature** — Battle-tested in production for years
 - **Flexible Metadata** — Can store arbitrary data per registration
@@ -45,7 +45,7 @@ Comparison of local process registry implementations.
 
 ## Architecture Comparison
 
-### Orca
+### Orka
 
 **Pros:**
 - Lock-free reads via ETS match specs
@@ -78,7 +78,7 @@ Comparison of local process registry implementations.
 
 ## Use Case Fit
 
-| Use Case | Orca | Gproc | Syn |
+| Use Case | Orka | Gproc | Syn |
 |----------|------|-------|-----|
 | Service Discovery | ✓✓ | ✓✓ | ✓✓ |
 | Load Balancing (by property) | ✓✓ | ✓ | ✓ |
@@ -90,7 +90,7 @@ Comparison of local process registry implementations.
 
 ## Performance Characteristics
 
-**Orca:** Lock-free reads via ETS, excellent for high-read workloads (<10K lookups/sec)
+**Orka:** Lock-free reads via ETS, excellent for high-read workloads (<10K lookups/sec)
 
 **Gproc:** Good reads via ETS, more overhead for complex features
 
@@ -98,7 +98,7 @@ Comparison of local process registry implementations.
 
 ## When to Use Each
 
-### Use Orca When
+### Use Orka When
 
 - Building microservice architectures with local service discovery
 - Need efficient property-based queries (load balancing by capacity, region, etc.)
@@ -119,7 +119,7 @@ Comparison of local process registry implementations.
 
 ## Assessment
 
-Orca is optimized for modern microservice architectures where you want:
+Orka is optimized for modern microservice architectures where you want:
 
 ✓ Fast local service discovery  
 ✓ Property-driven routing  

@@ -1,10 +1,10 @@
-# Orca Await/Subscribe Examples
+# Orka Await/Subscribe Examples
 
-This document provides practical examples of using `orca:await/2` and `orca:subscribe/1` for service startup coordination in multi-app systems.
+This document provides practical examples of using `orka:await/2` and `orka:subscribe/1` for service startup coordination in multi-app systems.
 
 ## Overview
 
-Orca provides two patterns for handling dependent services:
+Orka provides two patterns for handling dependent services:
 
 1. **`await/2`** - Blocking pattern for required dependencies
    - Waits for a key to be registered with a timeout
@@ -16,7 +16,7 @@ Orca provides two patterns for handling dependent services:
    - Receives message when key is registered
    - Suitable for graceful degradation and optional features
 
-Note about `await/2` timeouts: `await/2` subscribes and sets a timer that will send a `{orca_await_timeout, Key}` message to the waiting process on expiry. The implementation calls `unsubscribe/1` and drains the timeout message to avoid stale notifications. There is a small race window where a registration and the timeout may arrive concurrently; callers should handle both `{orca_registered, ...}` and timeout responses, or prefer `subscribe/1` for non-blocking semantics when exact ordering matters.
+Note about `await/2` timeouts: `await/2` subscribes and sets a timer that will send a `{orka_await_timeout, Key}` message to the waiting process on expiry. The implementation calls `unsubscribe/1` and drains the timeout message to avoid stale notifications. There is a small race window where a registration and the timeout may arrive concurrently; callers should handle both `{orka_registered, ...}` and timeout responses, or prefer `subscribe/1` for non-blocking semantics when exact ordering matters.
 
 ## 1. Blocking Initialization Pattern
 
@@ -34,7 +34,7 @@ start_link() ->
 
 init([]) ->
     %% This service requires the database service to exist
-    case orca:await({global, service, database}, 30000) of
+    case orka:await({global, service, database}, 30000) of
         {ok, {_Key, DbPid, _Metadata}} ->
             %% Database is ready
             {ok, #state{
@@ -77,11 +77,11 @@ init([]) ->
     end.
 
 await_all_services() ->
-    case orca:await({global, service, database}, 30000) of
+    case orka:await({global, service, database}, 30000) of
         {ok, {_, DbPid, _}} ->
-            case orca:await({global, service, cache}, 20000) of
+            case orka:await({global, service, cache}, 20000) of
                 {ok, {_, CachePid, _}} ->
-                    case orca:await({global, service, queue}, 15000) of
+                    case orka:await({global, service, queue}, 15000) of
                         {ok, {_, QueuePid, _}} ->
                             {ok, #{
                                 db => DbPid,
@@ -117,8 +117,8 @@ start_link() ->
 
 init([]) ->
     %% Subscribe to optional feature - don't block
-    orca:subscribe({global, service, sms_provider}),
-    orca:subscribe({global, service, push_service}),
+    orka:subscribe({global, service, sms_provider}),
+    orka:subscribe({global, service, push_service}),
     
     {ok, #state{
         sms_ready = false,
@@ -127,11 +127,11 @@ init([]) ->
         push_pid = undefined
     }}.
 
-handle_info({orca_registered, {global, service, sms_provider}, {_, SmsPid, _Meta}}, State) ->
+handle_info({orka_registered, {global, service, sms_provider}, {_, SmsPid, _Meta}}, State) ->
     io:format("SMS provider is now available~n", []),
     {noreply, State#state{sms_ready = true, sms_pid = SmsPid}};
 
-handle_info({orca_registered, {global, service, push_service}, {_, PushPid, _Meta}}, State) ->
+handle_info({orka_registered, {global, service, push_service}, {_, PushPid, _Meta}}, State) ->
     io:format("Push service is now available~n", []),
     {noreply, State#state{push_ready = true, push_pid = PushPid}};
 
@@ -164,12 +164,12 @@ handle_call({notify, Message}, _From, State) ->
 %% Service A: Depends on database
 -module(database_adapter).
 init([]) ->
-    case orca:await({global, service, database}, 30000) of
+    case orka:await({global, service, database}, 30000) of
         {ok, {_, Pid, _}} -> {ok, #state{db = Pid}};
         {error, timeout} -> {stop, db_unavailable}
     end,
     %% Register ourselves so dependent services can find us
-    orca:register({global, service, database_adapter}, self(), #{
+    orka:register({global, service, database_adapter}, self(), #{
         tags => [service, adapter, database]
     }),
     {ok, State}.
@@ -178,13 +178,13 @@ init([]) ->
 -module(data_service).
 init([]) ->
     %% Wait for database_adapter (which internally depends on database)
-    case orca:await({global, service, database_adapter}, 30000) of
+    case orka:await({global, service, database_adapter}, 30000) of
         {ok, {_, AdapterPid, _}} ->
             {ok, #state{adapter = AdapterPid}};
         {error, timeout} ->
             {stop, adapter_unavailable}
     end,
-    orca:register({global, service, data_service}, self(), #{
+    orka:register({global, service, data_service}, self(), #{
         tags => [service, data]
     }),
     {ok, State}.
@@ -192,7 +192,7 @@ init([]) ->
 %% Service C: Depends on data service
 -module(api_handler).
 init([]) ->
-    case orca:await({global, service, data_service}, 30000) of
+    case orka:await({global, service, data_service}, 30000) of
         {ok, {_, DataPid, _}} ->
             {ok, #state{data_service = DataPid}};
         {error, timeout} ->
@@ -219,18 +219,18 @@ start_link() ->
 
 init([]) ->
     %% Try to wait for analytics service, but don't block the whole app
-    case orca:await({global, service, analytics}, 5000) of
+    case orka:await({global, service, analytics}, 5000) of
         {ok, {_, AnalyticsPid, _}} ->
             io:format("Starting with analytics enabled~n", []),
             {ok, #state{analytics = AnalyticsPid, mode = full}};
         {error, timeout} ->
             io:format("Analytics unavailable, starting in degraded mode~n", []),
             %% Still subscribe for when it becomes available
-            orca:subscribe({global, service, analytics}),
+            orka:subscribe({global, service, analytics}),
             {ok, #state{analytics = undefined, mode = degraded}}
     end.
 
-handle_info({orca_registered, {global, service, analytics}, {_, Pid, _Meta}}, State) ->
+handle_info({orka_registered, {global, service, analytics}, {_, Pid, _Meta}}, State) ->
     io:format("Analytics is now available, upgrading from degraded mode~n", []),
     {noreply, State#state{analytics = Pid, mode = full}};
 
@@ -267,7 +267,7 @@ start_workers(N) ->
     [
         spawn(fun() ->
             WorkerId = {global, worker, Index},
-            orca:register(WorkerId, self(), #{
+            orka:register(WorkerId, self(), #{
                 tags => [worker, pool],
                 worker_index => Index
             })
@@ -277,7 +277,7 @@ start_workers(N) ->
 
 %% Consumer waits for specific worker
 get_worker(WorkerId, Timeout) ->
-    case orca:await(WorkerId, Timeout) of
+    case orka:await(WorkerId, Timeout) of
         {ok, {_, WorkerPid, _Meta}} ->
             {ok, WorkerPid};
         {error, timeout} ->
@@ -286,7 +286,7 @@ get_worker(WorkerId, Timeout) ->
 
 %% Find any available worker
 find_available_worker(Timeout) ->
-    case orca:await({global, worker, '_'}, Timeout) of
+    case orka:await({global, worker, '_'}, Timeout) of
         {ok, {_, WorkerPid, _Meta}} ->
             {ok, WorkerPid};
         {error, timeout} ->
@@ -305,16 +305,16 @@ find_available_worker(Timeout) ->
 
 enable_feature(FeatureId) ->
     Key = {global, feature, FeatureId},
-    orca:subscribe(Key),
+    orka:subscribe(Key),
     {ok, subscribed}.
 
 disable_feature(FeatureId) ->
     Key = {global, feature, FeatureId},
-    orca:unsubscribe(Key),
+    orka:unsubscribe(Key),
     {ok, unsubscribed}.
 
 handle_feature({global, feature, FeatureId}) ->
-    {orca_registered, {global, feature, FeatureId}, {_, FeaturePid, _Meta}} =
+    {orka_registered, {global, feature, FeatureId}, {_, FeaturePid, _Meta}} =
         receive_message(),
     io:format("Feature ~w is now available: ~p~n", [FeatureId, FeaturePid]).
 ```
@@ -349,10 +349,10 @@ await({global, service, analytics}, 2000)
 
 ```erlang
 %% Don't do this:
-{ok, {_, Pid, _}} = orca:await(Key, Timeout),
+{ok, {_, Pid, _}} = orka:await(Key, Timeout),
 
 %% Do this:
-case orca:await(Key, Timeout) of
+case orka:await(Key, Timeout) of
     {ok, {_, Pid, _}} -> start_with(Pid);
     {error, timeout} -> handle_timeout();
     {error, Reason} -> handle_error(Reason)
@@ -369,7 +369,7 @@ init([]) ->
     {ok, State} = initialize_basic_state(),
     
     %% Register immediately
-    orca:register({global, service, my_service}, self()),
+    orka:register({global, service, my_service}, self()),
     
     %% Do expensive initialization afterward
     {ok, State2} = initialize_expensive_stuff(State),

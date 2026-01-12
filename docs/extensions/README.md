@@ -1,17 +1,17 @@
-# Orca Extensions: Future Ideas & Patterns
+# Orka Extensions: Future Ideas & Patterns
 
-This directory contains documentation for planned extensions and patterns not yet implemented in the core Orca registry.
+This directory contains documentation for planned extensions and patterns not yet implemented in the core Orka registry.
 
-These are **ideas and designs** for future development, not production features. They demonstrate how Orca can be extended to handle advanced scenarios.
+These are **ideas and designs** for future development, not production features. They demonstrate how Orka can be extended to handle advanced scenarios.
 
 ## Extension Ideas
 
-### 1. **[Orca + Syn Integration (orca_syn.md)](orca_syn.md)**
+### 1. **[Orka + Syn Integration (orka_syn.md)](orka_syn.md)**
 
 **Status**: Design only (not implemented)
 
 Hybrid architecture combining:
-- **Orca** (local, fast, strong consistency)
+- **Orka** (local, fast, strong consistency)
 - **Syn** (distributed, eventual consistency)
 
 **Covers**:
@@ -19,7 +19,7 @@ Hybrid architecture combining:
 - Eventually consistent discovery
 - Hybrid queries by consistency level
 - Multi-node trading platform example
-- Syn vs Orca comparison
+- Syn vs Orka comparison
 - Migration path to distributed
 
 **Use case**: Multi-node deployments where you need both local performance and cluster-wide service discovery.
@@ -30,7 +30,7 @@ Hybrid architecture combining:
 
 **Status**: Design only (not implemented)
 
-Three approaches to managing process groups with Orca:
+Three approaches to managing process groups with Orka:
 - **Approach 1**: Tag-based groups (simplest)
 - **Approach 2**: Property-based groups (richer queries)
 - **Approach 3**: Hybrid with group registry (syn replacement)
@@ -70,11 +70,11 @@ Four approaches to querying multi-process per-user lookups:
 
 **Status**: Extension reference architecture (design only)
 
-Complete architecture for building Kafka and RabbitMQ clones using Orca as the process registry foundation, with four required extensions:
-- **orca_router** — Caching for high-throughput routing
-- **orca_pubsub** — Efficient multi-recipient broadcasting
-- **orca_batch** — Bulk operations for batch processing
-- **orca_sharded** — Distributed registry reducing contention
+Complete architecture for building Kafka and RabbitMQ clones using Orka as the process registry foundation, with four required extensions:
+- **orka_router** — Caching for high-throughput routing
+- **orka_pubsub** — Efficient multi-recipient broadcasting
+- **orka_batch** — Bulk operations for batch processing
+- **orka_sharded** — Distributed registry reducing contention
 
 **Covers**:
 - Kafka clone: topics, partitions, producers, consumers, consumer groups
@@ -84,7 +84,7 @@ Complete architecture for building Kafka and RabbitMQ clones using Orca as the p
 - When to use each extension
 - Integration patterns
 
-**Use case**: Building high-throughput distributed message systems using Orca as the service discovery foundation.
+**Use case**: Building high-throughput distributed message systems using Orka as the service discovery foundation.
 
 ---
 
@@ -94,16 +94,16 @@ These extensions are documented because they represent:
 
 1. **Good design patterns** - Worth understanding even if not building them
 2. **Future roadmap** - Ideas for when needs arise
-3. **Architecture examples** - How to extend Orca systematically
+3. **Architecture examples** - How to extend Orka systematically
 4. **Evaluation material** - Compare against built-in alternatives (syn, etc.)
 
-Core Orca includes everything needed for the **vast majority** of single-node use cases. These extensions address advanced scenarios.
+Core Orka includes everything needed for the **vast majority** of single-node use cases. These extensions address advanced scenarios.
 
 ---
 
 ## When to Use Extensions
 
-### Orca + Syn (orca_syn.md)
+### Orka + Syn (orka_syn.md)
 
 **When you need**:
 - Multi-node process discovery
@@ -145,19 +145,19 @@ Core Orca includes everything needed for the **vast majority** of single-node us
 If/when building these extensions, follow the pattern:
 
 ```erlang
-%% Core orca module
--module(orca).
+%% Core orka module
+-module(orka).
 %% Handles: registration, lookup, tags, properties, await, subscribe
 
-%% Extension modules build on orca
--module(orca_grp).      %% Process groups wrapper
--module(orca_syn_bridge).  %% Syn integration layer
--module(orca_counter).   %% Distributed counters (future)
+%% Extension modules build on orka
+-module(orka_grp).      %% Process groups wrapper
+-module(orka_syn_bridge).  %% Syn integration layer
+-module(orka_counter).   %% Distributed counters (future)
 ```
 
 **Principles**:
-1. Keep core Orca focused on registration + lookup
-2. Build extensions as separate modules using Orca as foundation
+1. Keep core Orka focused on registration + lookup
+2. Build extensions as separate modules using Orka as foundation
 3. Extensions add convenience or advanced patterns
 4. Core library stays minimal and fast
 
@@ -168,7 +168,7 @@ If/when building these extensions, follow the pattern:
 To decide if an extension should be built:
 
 1. **Is it in this directory?** → Design exists, pattern understood
-2. **Can Orca core + simple code solve it?** → Build that first (see [docs/](../))
+2. **Can Orka core + simple code solve it?** → Build that first (see [docs/](../))
 3. **Is it used in >1 project?** → Consider building the extension
 4. **Does it need strict semantics?** → Design carefully before implementing
 5. **Can users build it themselves?** → Document as pattern, provide examples
@@ -179,8 +179,8 @@ To decide if an extension should be built:
 
 | Extension | Status | Use Now? |
 |-----------|--------|----------|
-| Orca + Syn | Design | Use syn directly, or read pattern for architecture ideas |
-| Process Groups | Design | Use Orca tags + custom code, or read pattern examples |
+| Orka + Syn | Design | Use syn directly, or read pattern for architecture ideas |
+| Process Groups | Design | Use Orka tags + custom code, or read pattern examples |
 | Partial Matching | Design | Use tag-based lookup (recommended), see docs |
 | Message Systems | Design | Read for architecture ideas, build custom extensions as needed |
 

@@ -20,7 +20,7 @@ Yes, absolutely! This is a perfect use case for the singleton pattern. You can i
 %% Resource injection pattern with singleton
 get_or_start_db_service(ServiceName) ->
     Key = {global, service, ServiceName},
-    case orca:lookup(Key) of
+    case orka:lookup(Key) of
         {ok, Entry} ->
             %% Already registered, return it
             {ok, Entry};
@@ -28,14 +28,14 @@ get_or_start_db_service(ServiceName) ->
             %% Not registered, start it and register as singleton
             case start_db_service(ServiceName) of
                 {ok, Pid} ->
-                    case orca:register_single(Key, Pid, #{
+                    case orka:register_single(Key, Pid, #{
                         tags => [service, database, critical],
                         properties => #{service_name => ServiceName}
                     }) of
                         {ok, Entry} -> {ok, Entry};
                         {error, {already_registered_under_key, _}} ->
                             %% Race condition: another process registered it first
-                            orca:lookup(Key)
+                            orka:lookup(Key)
                     end;
                 {error, Reason} ->
                     {error, {start_failed, Reason}}
@@ -74,7 +74,7 @@ If service startup fails, error is returned
 If race condition occurs, the winner's registration is used
 No orphaned processes
 
-for lazy initialization with get-or-start, that logic belongs in the service module itself, not orca:
+for lazy initialization with get-or-start, that logic belongs in the service module itself, not orka:
 ```erlang
 %% In db_service module
 -module(db_service).
@@ -82,12 +82,12 @@ for lazy initialization with get-or-start, that logic belongs in the service mod
 %% Get existing or start new
 get_connection(ServiceName) ->
     Key = {global, service, ServiceName},
-    case orca:lookup(Key) of
+    case orka:lookup(Key) of
         {ok, {_K, Pid, _Meta}} ->
             {ok, Pid};
         not_found ->
             %% Start and register atomically
-            case orca:register_with(Key, #{tags => [database, service]}, 
+            case orka:register_with(Key, #{tags => [database, service]}, 
                                    {?MODULE, start_link, [ServiceName]}) of
                 {ok, Pid} -> {ok, Pid};
                 {error, Reason} -> {error, Reason}
@@ -99,14 +99,14 @@ For singleton pattern, the service would just use register_single instead:
 ```erlang
 get_connection(ServiceName) ->
     Key = {global, service, ServiceName},
-    case orca:lookup(Key) of
+    case orka:lookup(Key) of
         {ok, {_K, Pid, _Meta}} -> {ok, Pid};
         not_found ->
-            case orca:register_with(Key, #{tags => [database, service]},
+            case orka:register_with(Key, #{tags => [database, service]},
                                    {?MODULE, start_link, [ServiceName]}) of
                 {ok, Pid} ->
                     %% Register as singleton after successful start
-                    orca:register_single(Key, Pid, #{tags => [database, service]}),
+                    orka:register_single(Key, Pid, #{tags => [database, service]}),
                     {ok, Pid};
                 {error, Reason} -> {error, Reason}
             end
@@ -128,7 +128,7 @@ start_link() ->
 init() ->
     %% Register this counter service
     Key = {global, service, counter},
-    orca:register_single(Key, self(), #{
+    orka:register_single(Key, self(), #{
         tags => [service, counter, system],
         properties => #{}
     }),
@@ -145,7 +145,7 @@ loop(Counters) ->
             NewValue = maps:get(Name, Counters, 0) + 1,
             UpdatedCounters = maps:put(Name, NewValue, Counters),
             %% Register property with new value
-            orca:register_property({global, counter, Name}, self(), #{
+            orka:register_property({global, counter, Name}, self(), #{
                 property => Name,
                 value => NewValue
             }),
@@ -155,7 +155,7 @@ loop(Counters) ->
         {decrement, Name, From} ->
             NewValue = max(0, maps:get(Name, Counters, 0) - 1),
             UpdatedCounters = maps:put(Name, NewValue, Counters),
-            orca:register_property({global, counter, Name}, self(), #{
+            orka:register_property({global, counter, Name}, self(), #{
                 property => Name,
                 value => NewValue
             }),
@@ -164,7 +164,7 @@ loop(Counters) ->
         
         {set, Name, NewValue, From} ->
             UpdatedCounters = maps:put(Name, NewValue, Counters),
-            orca:register_property({global, counter, Name}, self(), #{
+            orka:register_property({global, counter, Name}, self(), #{
                 property => Name,
                 value => NewValue
             }),
@@ -186,7 +186,7 @@ set(CounterName, Value) ->
     call({set, CounterName, Value}).
 
 call(Request) ->
-    case orca:lookup({global, service, counter}) of
+    case orka:lookup({global, service, counter}) of
         {ok, {_Key, CounterPid, _Meta}} ->
             CounterPid ! {Request, self()},
             receive
@@ -217,12 +217,12 @@ counter_service:set(active_users, 10).
 counter_service:get(request_count).
 %% Result: {ok, 2}
 
-%% Query via orca (eventually consistent view)
-orca:find_by_property(counter, request_count, 2).
+%% Query via orka (eventually consistent view)
+orka:find_by_property(counter, request_count, 2).
 %% Result: [{{global, counter, request_count}, <0.123.0>, {...}}]
 
 %% Get all counter values
-orca:property_stats(request_count, counter).
+orka:property_stats(request_count, counter).
 %% Result: #{2 => 1}
 ```
 Pros of Property-Based Counters
@@ -264,7 +264,7 @@ loop(State = #{counter => Counter}) ->
             %% Register property periodically (e.g., every 1000 increments)
             case NewCounter rem 1000 of
                 0 ->
-                    orca:register_property({global, service, my_service}, self(), #{
+                    orka:register_property({global, service, my_service}, self(), #{
                         property => request_count,
                         value => NewCounter
                     });
@@ -280,7 +280,7 @@ Yes, property-based counters work well for:
 
 System metrics that change slowly (< 100/second)
 Operational dashboards and monitoring
-Counts you want to query/filter alongside other orca data
+Counts you want to query/filter alongside other orka data
 Anything that doesn't need microsecond accuracy
 Use gproc-style counters instead for:
 
@@ -288,7 +288,7 @@ High-frequency metrics (> 1000/second)
 Atomic increment/decrement operations
 Metrics that must survive process restarts
 Global cluster-wide counters
-The property-based approach is elegant for moderate-frequency metrics because it gives you searchability and observability while keeping orca focused on process registration.
+The property-based approach is elegant for moderate-frequency metrics because it gives you searchability and observability while keeping orka focused on process registration.
 
 
 Services can implement their own pre-registration patterns if needed:
@@ -298,15 +298,15 @@ Services can implement their own pre-registration patterns if needed:
 
 %% Pre-register a placeholder (process 1 managing startup)
 pre_register(ServiceName) ->
-    orca:register({global, service, ServiceName}, self(), #{
+    orka:register({global, service, ServiceName}, self(), #{
         tags => [service, starting],
         properties => #{status => initializing}
     }).
 
 %% Later, when ready, update metadata
 mark_ready() ->
-    orca:add_tag({global, service, my_service}, ready),
-    orca:remove_tag({global, service, my_service}, starting).
+    orka:add_tag({global, service, my_service}, ready),
+    orka:remove_tag({global, service, my_service}, starting).
 ```
 
 Or use a startup coordinator:
@@ -315,7 +315,7 @@ Or use a startup coordinator:
 startup_coordinator() ->
     Services = [translator, cache, database],
     Pids = lists:map(fun(Service) ->
-        case orca:await({global, service, Service}, 30000) of
+        case orka:await({global, service, Service}, 30000) of
             {ok, {_K, Pid, _Meta}} -> Pid;
             {error, timeout} -> throw({service_timeout, Service})
         end

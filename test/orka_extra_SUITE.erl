@@ -1,4 +1,4 @@
--module(orca_extra_SUITE).
+-module(orka_extra_SUITE).
 
 %% Callbacks
 -export([all/0, init_per_suite/1, end_per_suite/1]).
@@ -27,20 +27,20 @@ all() ->
 	].
 
 init_per_suite(Config) ->
-	application:stop(orca),
+	application:stop(orka),
 	timer:sleep(50),
-	ok = application:start(orca),
+	ok = application:start(orka),
 	timer:sleep(100),
 	Config.
 
 end_per_suite(_Config) ->
-	application:stop(orca),
+	application:stop(orka),
 	ok.
 
 init_per_testcase(_TestCase, Config) ->
-	catch application:stop(orca),
+	catch application:stop(orka),
 	timer:sleep(100),
-	ok = application:start(orca),
+	ok = application:start(orka),
 	timer:sleep(100),
 	Config.
 
@@ -62,16 +62,16 @@ test_find_by_property_with_scoped_key_type(Config) ->
 	Pid2 = spawn(fun() -> timer:sleep(10000) end),
 	Pid3 = spawn(fun() -> timer:sleep(10000) end),
 
-	{ok, _} = orca:register(Key1, Pid1, #{tags => [cache]}),
-	ok = orca:register_property(Key1, Pid1, #{property => status, value => "healthy"}),
+	{ok, _} = orka:register(Key1, Pid1, #{tags => [cache]}),
+	ok = orka:register_property(Key1, Pid1, #{property => status, value => "healthy"}),
 
-	{ok, _} = orca:register(Key2, Pid2, #{tags => [cache]}),
-	ok = orca:register_property(Key2, Pid2, #{property => status, value => "healthy"}),
+	{ok, _} = orka:register(Key2, Pid2, #{tags => [cache]}),
+	ok = orka:register_property(Key2, Pid2, #{property => status, value => "healthy"}),
 
-	{ok, _} = orca:register(Key3, Pid3, #{tags => [db]}),
-	ok = orca:register_property(Key3, Pid3, #{property => status, value => "healthy"}),
+	{ok, _} = orka:register(Key3, Pid3, #{tags => [db]}),
+	ok = orka:register_property(Key3, Pid3, #{property => status, value => "healthy"}),
 
-	Entries = orca:find_by_property(service, status, "healthy"),
+	Entries = orka:find_by_property(service, status, "healthy"),
 	2 = length(Entries),
 	true = lists:any(fun({K, _, _}) -> K =:= Key1 end, Entries),
 	true = lists:any(fun({K, _, _}) -> K =:= Key2 end, Entries),
@@ -91,16 +91,16 @@ test_property_stats_uses_property_name(Config) ->
 	Pid2 = spawn(fun() -> timer:sleep(10000) end),
 	Pid3 = spawn(fun() -> timer:sleep(10000) end),
 
-	{ok, _} = orca:register(Key1, Pid1, #{tags => [service]}),
-	ok = orca:register_property(Key1, Pid1, #{property => region, value => "us-west"}),
+	{ok, _} = orka:register(Key1, Pid1, #{tags => [service]}),
+	ok = orka:register_property(Key1, Pid1, #{property => region, value => "us-west"}),
 
-	{ok, _} = orca:register(Key2, Pid2, #{tags => [service]}),
-	ok = orca:register_property(Key2, Pid2, #{property => region, value => "us-west"}),
+	{ok, _} = orka:register(Key2, Pid2, #{tags => [service]}),
+	ok = orka:register_property(Key2, Pid2, #{property => region, value => "us-west"}),
 
-	{ok, _} = orca:register(Key3, Pid3, #{tags => [service]}),
-	ok = orca:register_property(Key3, Pid3, #{property => region, value => "us-east"}),
+	{ok, _} = orka:register(Key3, Pid3, #{tags => [service]}),
+	ok = orka:register_property(Key3, Pid3, #{property => region, value => "us-east"}),
 
-	Stats = orca:property_stats(service, region),
+	Stats = orka:property_stats(service, region),
 	#{"us-west" := 2, "us-east" := 1} = Stats,
 
 	ct:log("✓ property_stats/2 counts by property name"),
@@ -111,12 +111,12 @@ test_register_with_preserves_live_tags(Config) ->
 	Key = {global, service, tag_index_test},
 	Pid1 = spawn(fun() -> timer:sleep(10000) end),
 
-	{ok, _} = orca:register(Key, Pid1, #{tags => [old_tag]}),
-	{ok, {Key, Pid1, _}} = orca:register_with(Key, #{tags => [new_tag]},
+	{ok, _} = orka:register(Key, Pid1, #{tags => [old_tag]}),
+	{ok, {Key, Pid1, _}} = orka:register_with(Key, #{tags => [new_tag]},
 		{erlang, spawn, [fun() -> timer:sleep(10000) end]}),
 
-	OldEntries = orca:entries_by_tag(old_tag),
-	NewEntries = orca:entries_by_tag(new_tag),
+	OldEntries = orka:entries_by_tag(old_tag),
+	NewEntries = orka:entries_by_tag(new_tag),
 
 	true = lists:any(fun({K, _, _}) -> K =:= Key end, OldEntries),
 	false = lists:any(fun({K, _, _}) -> K =:= Key end, NewEntries),
@@ -130,10 +130,10 @@ test_register_single_returns_existing(Config) ->
 	Meta1 = #{tags => [service], version => 1},
 	Meta2 = #{tags => [service, updated], version => 2},
 
-	{ok, {Key, Pid, Meta1}} = orca:register_single(Key, Meta1),
-	{ok, {Key, Pid, Meta1}} = orca:register_single(Key, Pid, Meta2),
+	{ok, {Key, Pid, Meta1}} = orka:register_single(Key, Meta1),
+	{ok, {Key, Pid, Meta1}} = orka:register_single(Key, Pid, Meta2),
 
-	{ok, {Key, Pid, Meta1}} = orca:lookup(Key),
+	{ok, {Key, Pid, Meta1}} = orka:lookup(Key),
 
 	ct:log("✓ register_single/3 returns existing entry on idempotent call"),
 	Config.

@@ -1,4 +1,4 @@
--module(orca_concurrency_SUITE).
+-module(orka_concurrency_SUITE).
 
 %% Common Test callbacks
 -export([all/0, init_per_suite/1, end_per_suite/1]).
@@ -19,20 +19,20 @@ all() ->
 	].
 
 init_per_suite(Config) ->
-	catch application:stop(orca),
+	catch application:stop(orka),
 	timer:sleep(50),
-	ok = application:start(orca),
+	ok = application:start(orka),
 	timer:sleep(100),
 	Config.
 
 end_per_suite(_Config) ->
-	application:stop(orca),
+	application:stop(orka),
 	ok.
 
 init_per_testcase(_TestCase, Config) ->
-	catch application:stop(orca),
+	catch application:stop(orka),
 	timer:sleep(100),
-	ok = application:start(orca),
+	ok = application:start(orka),
 	timer:sleep(100),
 	Config.
 
@@ -45,7 +45,7 @@ test_concurrent_register_with_same_key(Config) ->
 	Metadata = #{tags => [service]},
 	Parent = self(),
 	Caller = fun() ->
-		Result = orca:register_with(Key, Metadata,
+		Result = orka:register_with(Key, Metadata,
 			{erlang, spawn, [fun() -> timer:sleep(10000) end]}),
 		Parent ! {register_with_result, Result}
 	end,
@@ -56,7 +56,7 @@ test_concurrent_register_with_same_key(Config) ->
 	PidList = [extract_pid(R) || R <- Results],
 	[FirstPid | _] = PidList,
 	true = lists:all(fun(P) -> P =:= FirstPid end, PidList),
-	{ok, {Key, FirstPid, _}} = orca:lookup(Key),
+	{ok, {Key, FirstPid, _}} = orka:lookup(Key),
 
 	ct:log("✓ concurrent register_with/3 returns same entry"),
 	Config.
@@ -67,13 +67,13 @@ test_concurrent_awaiters(Config) ->
 	Metadata = #{tags => [service, await]},
 	Parent = self(),
 	Awaiter = fun() ->
-		Result = orca:await(Key, 5000),
+		Result = orka:await(Key, 5000),
 		Parent ! {await_result, Result}
 	end,
 
 	_ = [spawn(Awaiter) || _ <- lists:seq(1, 5)],
 	timer:sleep(100),
-	{ok, {Key, _Pid, _}} = orca:register(Key, Metadata),
+	{ok, {Key, _Pid, _}} = orka:register(Key, Metadata),
 
 	Results = gather_await_results(5, []),
 	5 = length(Results),

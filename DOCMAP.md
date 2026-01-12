@@ -1,6 +1,6 @@
 # Documentation Map
 
-This is your quick navigation guide to all Orca documentation.
+This is your quick navigation guide to all Orka documentation.
 
 ## Start Here
 
@@ -46,7 +46,7 @@ This is your quick navigation guide to all Orca documentation.
 
 ### "I have a multi-node system"
 1. [docs/comparison.md](docs/comparison.md) — Evaluate options
-2. [docs/extensions/orca_syn.md](docs/extensions/orca_syn.md) — Hybrid architecture (design)
+2. [docs/extensions/orka_syn.md](docs/extensions/orka_syn.md) — Hybrid architecture (design)
 
 ### "I need to group processes"
 1. [docs/usage_patterns.md](docs/usage_patterns.md) Pattern 1-3 — Basic grouping
@@ -80,15 +80,15 @@ This is your quick navigation guide to all Orca documentation.
   7 startup coordination examples from blocking to non-blocking
 
 - **docs/comparison.md** (3.8K)  
-  Feature comparison: Orca vs gproc vs syn
+  Feature comparison: Orka vs gproc vs syn
 
 ### Extension Ideas (Not Implemented)
 
 - **docs/extensions/README.md** (NEW)  
   Overview of extension ideas and when to use them
 
-- **docs/extensions/orca_syn.md** (20K)  
-  Hybrid Orca + Syn architecture for distributed systems (design only)
+- **docs/extensions/orka_syn.md** (20K)  
+  Hybrid Orka + Syn architecture for distributed systems (design only)
 
 - **docs/extensions/groups_examples.md** (13K)  
   3 approaches to process groups (design only)
@@ -119,7 +119,7 @@ API.md (COMPLETE REFERENCE)
 ## File Organization
 
 ```
-orca/
+orka/
 ├── README.md                    ← START HERE
 ├── API.md                       ← API REFERENCE
 ├── DOCMAP.md                    ← YOU ARE HERE
@@ -135,14 +135,14 @@ orca/
     │
     └── extensions/              ← NOT YET IMPLEMENTED
         ├── README.md            ← Extension overview
-        ├── orca_syn.md          ← Multi-node pattern
+        ├── orka_syn.md          ← Multi-node pattern
         ├── groups_examples.md   ← Process groups
         └── partial_match_options.md  ← Query patterns
 ```
 
 ## Recommended Reading Order
 
-**New to Orca?**
+**New to Orka?**
 
 1. README.md (project overview)
 2. API.md sections: Quick Start, Core API
@@ -158,11 +158,11 @@ orca/
 **Contributing/Maintaining?**
 
 1. API.md - entire document
-2. test/orca_SUITE.erl - understand test structure
+2. test/orka_SUITE.erl - understand test structure
 3. docs/ - learn patterns for code review
 4. docs/extensions/ - understand extension philosophy
 
-**Evaluating Orca?**
+**Evaluating Orka?**
 
 1. README.md - features and use cases
 2. docs/comparison.md - how it compares
@@ -175,10 +175,10 @@ To create a single-document guide:
 
 ```bash
 # Print all docs to one file (Unix/Linux)
-cat README.md API.md docs/usage_patterns.md > orca_guide.md
+cat README.md API.md docs/usage_patterns.md > orka_guide.md
 
 # Generate PDF (requires pandoc)
-pandoc -o orca_guide.pdf README.md API.md docs/*.md
+pandoc -o orka_guide.pdf README.md API.md docs/*.md
 ```
 
 ## Search Tips

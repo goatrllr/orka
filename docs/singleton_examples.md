@@ -1,6 +1,6 @@
-# Orca Singleton Registration Examples
+# Orka Singleton Registration Examples
 
-The Orca process registry supports singleton registration through `register_single/2` and `register_single/3`. These functions enforce a strict one-key-per-process constraint, preventing a Pid from being registered under multiple aliases.
+The Orka process registry supports singleton registration through `register_single/2` and `register_single/3`. These functions enforce a strict one-key-per-process constraint, preventing a Pid from being registered under multiple aliases.
 
 ## Key Concepts
 
@@ -14,10 +14,10 @@ The Orca process registry supports singleton registration through `register_sing
 
 ```erlang
 %% Register a process with singleton constraint (self as Pid)
-orca:register_single(Key, Metadata).
+orka:register_single(Key, Metadata).
 
 %% Register a process with singleton constraint (explicit Pid)
-orca:register_single(Key, Pid, Metadata).
+orka:register_single(Key, Pid, Metadata).
 ```
 
 Returns:
@@ -37,7 +37,7 @@ Ensure only ONE instance of a critical service runs on the node. If another proc
 
 ```erlang
 %% Start and register translator service as singleton
-orca:register_single(
+orka:register_single(
     {local, service, translator},
     TranslatorPid,
     #{
@@ -52,7 +52,7 @@ orca:register_single(
 
 ```erlang
 %% Later, someone tries to register the same process under an alias
-orca:register_single(
+orka:register_single(
     {local, service, translator_backup},
     TranslatorPid,
     #{tags => [service, translator]}
@@ -60,10 +60,10 @@ orca:register_single(
 %% Result: {error, {already_registered_under_key, {local, service, translator}}}
 
 %% The process is STILL only registered under the original key
-orca:lookup({local, service, translator}).
+orka:lookup({local, service, translator}).
 %% Result: {ok, {{local, service, translator}, <0.123.0>, {...}}}
 
-orca:lookup({local, service, translator_backup}).
+orka:lookup({local, service, translator_backup}).
 %% Result: not_found
 ```
 
@@ -72,7 +72,7 @@ orca:lookup({local, service, translator_backup}).
 ```erlang
 %% Common mistake: trying to create a failover alias
 failover_translator(OriginalTranslatorPid) ->
-    case orca:register_single(
+    case orka:register_single(
         {local, service, translator_standby},
         OriginalTranslatorPid,
         #{tags => [service, translator, standby]}
@@ -83,7 +83,7 @@ failover_translator(OriginalTranslatorPid) ->
             %% OriginalTranslatorPid is already registered elsewhere
             %% Start a NEW process instead
             {NewPid, _} = start_translator_service(),
-            orca:register_single(
+            orka:register_single(
                 {local, service, translator_standby},
                 NewPid,
                 #{tags => [service, translator, standby]}
@@ -103,7 +103,7 @@ Prevent duplicate pool managers that could cause connection leaks or consistency
 
 ```erlang
 %% Only ONE connection pool manager should exist
-orca:register_single(
+orka:register_single(
     {global, resource, db_pool_manager},
     PoolManagerPid,
     #{
@@ -122,7 +122,7 @@ orca:register_single(
 
 ```erlang
 %% Someone tries to create a "secondary" pool manager for the same process
-orca:register_single(
+orka:register_single(
     {global, resource, db_pool_manager_secondary},
     PoolManagerPid,
     #{tags => [resource, database]}
@@ -145,7 +145,7 @@ A single system configuration server that must not have aliases or replication.
 
 ```erlang
 %% Register config server as strict singleton
-orca:register_single(
+orka:register_single(
     {global, service, config_server},
     ConfigServerPid,
     #{
@@ -165,18 +165,18 @@ orca:register_single(
 ```erlang
 %% BAD: Multiple service-specific config endpoints
 %% If allowed (with register/3), each would cache independently:
-orca:register({global, service, app_config}, ConfigServerPid, #{...}).
-orca:register({global, service, api_config}, ConfigServerPid, #{...}).
-orca:register({global, service, db_config}, ConfigServerPid, #{...}).
+orka:register({global, service, app_config}, ConfigServerPid, #{...}).
+orka:register({global, service, api_config}, ConfigServerPid, #{...}).
+orka:register({global, service, db_config}, ConfigServerPid, #{...}).
 
 %% Now two services get different views when config reloads!
 %% ConfigServerPid reloads internally, but services still see stale values
 
 %% SOLUTION: Singleton forces a single registration point
-orca:register_single({global, service, config_server}, ConfigServerPid, {...}).
+orka:register_single({global, service, config_server}, ConfigServerPid, {...}).
 
 %% All services must use the same key to get current config
-Config = orca:lookup({global, service, config_server}).
+Config = orka:lookup({global, service, config_server}).
 ```
 
 ---
@@ -189,7 +189,7 @@ Ensure only ONE lock manager coordinates cluster-wide locks.
 
 ```erlang
 %% Register lock manager as strict singleton
-orca:register_single(
+orka:register_single(
     {global, resource, lock_manager},
     LockManagerPid,
     #{
@@ -208,7 +208,7 @@ orca:register_single(
 
 ```erlang
 %% Prevents accidental duplicate registrations that could cause deadlocks
-orca:register_single(
+orka:register_single(
     {global, resource, lock_manager_backup},
     LockManagerPid,
     #{tags => [resource, locks]}
@@ -217,7 +217,7 @@ orca:register_single(
 
 %% Lock consistency is guaranteed because there's only one source of truth
 request_lock(ResourceId, Timeout) ->
-    case orca:lookup({global, resource, lock_manager}) of
+    case orka:lookup({global, resource, lock_manager}) of
         {ok, {_Key, ManagerPid, _Meta}} ->
             gen_server:call(ManagerPid, {acquire_lock, ResourceId, Timeout});
         not_found ->
@@ -235,7 +235,7 @@ A single event distribution system that shouldn't be replicated or aliased.
 
 ```erlang
 %% Register event bus as strict singleton
-orca:register_single(
+orka:register_single(
     {local, service, event_bus},
     EventBusPid,
     #{
@@ -254,8 +254,8 @@ orca:register_single(
 
 ```erlang
 %% Without singleton protection, someone might create "regional" aliases:
-orca:register({local, service, event_bus_us_west}, EventBusPid, {...}).
-orca:register({local, service, event_bus_us_east}, EventBusPid, {...}).
+orka:register({local, service, event_bus_us_west}, EventBusPid, {...}).
+orka:register({local, service, event_bus_us_east}, EventBusPid, {...}).
 
 %% Now subscribers are split:
 %% - east subscribers: published_event(<<"user.registered">>, ...)
@@ -263,12 +263,12 @@ orca:register({local, service, event_bus_us_east}, EventBusPid, {...}).
 %% - Cause: different subscribers registered for each alias
 
 %% Singleton prevents this:
-orca:register_single({local, service, event_bus_us_west}, EventBusPid, {...}).
+orka:register_single({local, service, event_bus_us_west}, EventBusPid, {...}).
 %% Error: {already_registered_under_key, {local, service, event_bus}}
 
 %% Forces single event bus coordinate all subscriptions
 subscribe(EventType, CallbackFun) ->
-    {ok, {_Key, BusPid, _Meta}} = orca:lookup({local, service, event_bus}),
+    {ok, {_Key, BusPid, _Meta}} = orka:lookup({local, service, event_bus}),
     gen_server:call(BusPid, {subscribe, EventType, CallbackFun}).
 ```
 
@@ -282,7 +282,7 @@ A single system-wide metrics aggregator that must have one registration point.
 
 ```erlang
 %% Register metrics collector as strict singleton
-orca:register_single(
+orka:register_single(
     {local, service, metrics_collector},
     MetricsCollectorPid,
     #{
@@ -301,7 +301,7 @@ orca:register_single(
 
 ```erlang
 %% Prevents duplicate collectors that would send duplicate metrics
-orca:register_single(
+orka:register_single(
     {local, service, metrics_collector_secondary},
     MetricsCollectorPid,
     #{tags => [service, monitoring]}
@@ -311,7 +311,7 @@ orca:register_single(
 %% Single source of truth for all metrics
 emit_metric(MetricName, Value, Tags) ->
     {ok, {_Key, CollectorPid, _Meta}} = 
-        orca:lookup({local, service, metrics_collector}),
+        orka:lookup({local, service, metrics_collector}),
     gen_server:cast(CollectorPid, {metric, MetricName, Value, Tags}).
 ```
 
@@ -325,7 +325,7 @@ Central security service that must not be replicated or have authorization bypas
 
 ```erlang
 %% Register auth server as strict singleton
-orca:register_single(
+orka:register_single(
     {global, service, auth_server},
     AuthServerPid,
     #{
@@ -345,13 +345,13 @@ orca:register_single(
 ```erlang
 %% Without singleton, someone might create a "backdoor" alias with relaxed settings:
 %% BAD CODE (prevented by singleton):
-%% orca:register({global, service, auth_server_dev}, AuthServerPid, #{
+%% orka:register({global, service, auth_server_dev}, AuthServerPid, #{
 %%     tags => [service, security],
 %%     properties => #{mfa_required => false}  %% Dangerous!
 %% }).
 
 %% Singleton prevents this:
-orca:register_single(
+orka:register_single(
     {global, service, auth_server_dev},
     AuthServerPid,
     #{tags => [service, security]}
@@ -361,7 +361,7 @@ orca:register_single(
 %% All authentication must go through the same registered instance
 verify_credentials(Username, Password) ->
     {ok, {_Key, AuthPid, _Meta}} = 
-        orca:lookup({global, service, auth_server}),
+        orka:lookup({global, service, auth_server}),
     gen_server:call(AuthPid, {verify, Username, Password}).
 ```
 
@@ -373,11 +373,11 @@ verify_credentials(Username, Password) ->
 
 ```erlang
 %% One process, one key
-orca:register_single({global, service, translator}, Pid, Meta).
+orka:register_single({global, service, translator}, Pid, Meta).
 %% {ok, Entry}
 
 %% Try to add alias
-orca:register_single({global, service, translator_2}, Pid, Meta).
+orka:register_single({global, service, translator_2}, Pid, Meta).
 %% {error, {already_registered_under_key, {global, service, translator}}}
 ```
 
@@ -391,15 +391,15 @@ orca:register_single({global, service, translator_2}, Pid, Meta).
 
 ```erlang
 %% One process, multiple keys allowed
-orca:register({global, service, translator_1}, Pid, Meta).
+orka:register({global, service, translator_1}, Pid, Meta).
 %% {ok, Entry}
 
-orca:register({global, service, translator_2}, Pid, Meta).
+orka:register({global, service, translator_2}, Pid, Meta).
 %% {ok, Entry} — Both keys now point to same Pid
 
 %% Both keys are active
-orca:lookup({global, service, translator_1}).  %% {ok, Entry}
-orca:lookup({global, service, translator_2}).  %% {ok, Entry}
+orka:lookup({global, service, translator_1}).  %% {ok, Entry}
+orka:lookup({global, service, translator_2}).  %% {ok, Entry}
 ```
 
 **Use When:**
@@ -416,15 +416,15 @@ If you have a process that was registered with `register/3` and want to convert 
 
 ```erlang
 %% Old: Could have multiple aliases
-orca:register({global, service, translator}, Pid, Meta).
-orca:register({global, service, old_translator}, Pid, Meta).
+orka:register({global, service, translator}, Pid, Meta).
+orka:register({global, service, old_translator}, Pid, Meta).
 
 %% Unregister the old alias
-orca:unregister({global, service, old_translator}).
+orka:unregister({global, service, old_translator}).
 
 %% Re-register as singleton
-orca:unregister({global, service, translator}).
-orca:register_single({global, service, translator}, Pid, Meta).
+orka:unregister({global, service, translator}).
+orka:register_single({global, service, translator}, Pid, Meta).
 ```
 
 ---
@@ -435,14 +435,14 @@ orca:register_single({global, service, translator}, Pid, Meta).
 
 ```erlang
 ensure_singleton_alive(Key, M, F, A) ->
-    case orca:lookup(Key) of
+    case orka:lookup(Key) of
         {ok, {Key, Pid, Meta}} ->
             {ok, {Key, Pid, Meta}};
         not_found ->
             %% Not registered, start and register
-            {ok, NewPid} = orca:register_with(Key, #{}, {M, F, A}),
-            orca:register_single(Key, NewPid, #{}),
-            orca:lookup(Key)
+            {ok, NewPid} = orka:register_with(Key, #{}, {M, F, A}),
+            orka:register_single(Key, NewPid, #{}),
+            orka:lookup(Key)
     end.
 ```
 
@@ -452,18 +452,18 @@ ensure_singleton_alive(Key, M, F, A) ->
 %% For true high availability, use non-singleton register/3
 %% But for consistency, use a single "primary" with singleton
 register_primary(PrimaryPid) ->
-    orca:register_single({global, service, translator_primary}, PrimaryPid, Meta).
+    orka:register_single({global, service, translator_primary}, PrimaryPid, Meta).
 
 register_secondary(SecondaryPid) ->
     %% Secondary CAN'T use singleton, it's a backup
-    orca:register({global, service, translator_backup}, SecondaryPid, Meta).
+    orka:register({global, service, translator_backup}, SecondaryPid, Meta).
 
 get_translator() ->
-    case orca:lookup({global, service, translator_primary}) of
+    case orka:lookup({global, service, translator_primary}) of
         {ok, {_, Pid, _}} -> {ok, Pid};
         not_found ->
             %% Primary down, use backup
-            case orca:find_by_property(service, translator, status, <<"ready">>) of
+            case orka:find_by_property(service, translator, status, <<"ready">>) of
                 [{_, BackupPid, _}|_] -> {ok, BackupPid};
                 [] -> {error, no_translators}
             end
@@ -475,13 +475,13 @@ get_translator() ->
 ```erlang
 %% Ensure a singleton is initialized or return existing
 init_singleton(Key, Metadata, {M, F, A}) ->
-    case orca:lookup(Key) of
+    case orka:lookup(Key) of
         {ok, Entry} ->
             {ok, Entry};
         not_found ->
-            {ok, Pid} = orca:register_with(Key, Metadata, {M, F, A}),
-            orca:register_single(Key, Pid, Metadata),
-            orca:lookup(Key)
+            {ok, Pid} = orka:register_with(Key, Metadata, {M, F, A}),
+            orka:register_single(Key, Pid, Metadata),
+            orka:lookup(Key)
     end.
 ```
 

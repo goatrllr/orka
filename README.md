@@ -1,16 +1,16 @@
-# Orca: Fast Process Registry for Erlang
+# Orka: Fast Process Registry for Erlang
 
 <div align="center">
 
-![Orca Logo](docs/images/orca_logo.png)
+![Orka Logo](docs/images/orka_logo.png)
 
 ![Tests](https://img.shields.io/badge/tests-71%2F71%20passing-brightgreen) ![Status](https://img.shields.io/badge/status-production%20ready-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
 </div>
 
-Orca is a **high-performance, ETS-based process registry** for Erlang/OTP applications. It provides fast lock-free lookups, automatic process lifecycle management, rich metadata querying, and startup coordination features.
+Orka is a **high-performance, ETS-based process registry** for Erlang/OTP applications. It provides fast lock-free lookups, automatic process lifecycle management, rich metadata querying, and startup coordination features.
 
-## What Orca Provides
+## What Orka Provides
 
 ✅ **Fast registration & lookup** — O(1) lookups via ETS public tables  
 ✅ **Automatic cleanup** — Process monitors handle crashes  
@@ -35,25 +35,25 @@ Orca is a **high-performance, ETS-based process registry** for Erlang/OTP applic
 
 ```erlang
 %% Register a service
-orca:register({global, service, translator}, Pid, #{
+orka:register({global, service, translator}, Pid, #{
     tags => [online, critical],
     properties => #{capacity => 100, version => "2.1"}
 }).
 
 %% Lookup by key
-{ok, {Key, Pid, Metadata}} = orca:lookup({global, service, translator}).
+{ok, {Key, Pid, Metadata}} = orka:lookup({global, service, translator}).
 
 %% Query by tag
-OnlineServices = orca:entries_by_tag(online).
+OnlineServices = orka:entries_by_tag(online).
 
 %% Query by property
-HighCapacity = orca:find_by_property(capacity, 100).
+HighCapacity = orka:find_by_property(capacity, 100).
 
 %% Await service startup
-{ok, Entry} = orca:await({global, service, database}, 30000).
+{ok, Entry} = orka:await({global, service, database}, 30000).
 
 %% Batch register (atomic, explicit Pids)
-{ok, Entries} = orca:register_batch([
+{ok, Entries} = orka:register_batch([
     {{global, portfolio, user1}, Pid1, #{tags => [portfolio, user1]}},
     {{global, orders, user1}, Pid2, #{tags => [orders, user1]}}
 ]).
@@ -70,14 +70,14 @@ Start with **[API.md](API.md)** for complete documentation, then explore:
 | **[docs/singleton_examples.md](docs/singleton_examples.md)** | Single-instance services |
 | **[docs/property_examples.md](docs/property_examples.md)** | Rich metadata querying |
 | **[docs/await_examples.md](docs/await_examples.md)** | Startup coordination |
-| **[docs/comparison.md](docs/comparison.md)** | Orca vs gproc vs syn |
+| **[docs/comparison.md](docs/comparison.md)** | Orka vs gproc vs syn |
 | **[docs/extensions/](docs/extensions/)** | Future extension ideas |
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────┐
-│      Orca Gen_Server                │
+│      Orka Gen_Server                │
 │  (registration, monitors, notify)   │
 └──────────────┬──────────────────────┘
                │
@@ -117,7 +117,7 @@ All features are thoroughly tested:
 ```bash
 make ct        # Run Common Test suite (71/71 passing)
 make clean     # Clean build artifacts
-make erl       # Start Erlang shell with orca loaded
+make erl       # Start Erlang shell with orka loaded
 ```
 
 Test coverage includes:
@@ -129,7 +129,7 @@ Test coverage includes:
 - Batch operations
 - Concurrent subscribers
 
-See `test/orca_SUITE.erl` for implementations.
+See `test/orka_SUITE.erl` for implementations.
 
 ## Design Principles
 
@@ -145,20 +145,20 @@ Process crashes are detected via monitors and entries are automatically removed.
 - **Properties** — For rich attributes: `region: "us-west"`, `capacity: 100`
 
 **4. Local-Only**  
-Orca handles single-node registries. For distributed systems, see [Orca + Syn patterns](docs/extensions/orca_syn.md).
+Orka handles single-node registries. For distributed systems, see [Orka + Syn patterns](docs/extensions/orka_syn.md).
 
 ## Key Patterns
 
 ### Supervisor Registration
 ```erlang
 init([]) ->
-    orca:register({global, service, my_service}, self(), #{tags => [online]}),
+    orka:register({global, service, my_service}, self(), #{tags => [online]}),
     {ok, #state{}}.
 ```
 
 ### Atomic Startup
 ```erlang
-{ok, Pid} = orca:register_with(
+{ok, Pid} = orka:register_with(
     {global, service, database},
     #{tags => [critical]},
     {db_server, start_link, []}
@@ -167,12 +167,12 @@ init([]) ->
 
 ### Singleton Services
 ```erlang
-{ok, _} = orca:register_single({global, service, config}, #{tags => [critical]}).
+{ok, _} = orka:register_single({global, service, config}, #{tags => [critical]}).
 ```
 
 ### Batch Registration
 ```erlang
-{ok, Entries} = orca:register_batch([
+{ok, Entries} = orka:register_batch([
     {{global, portfolio, user1}, Pid1, #{tags => [user1, portfolio]}},
     {{global, orders, user1}, Pid2, #{tags => [user1, orders]}},
     {{global, risk, user1}, Pid3, #{tags => [user1, risk]}}
@@ -182,24 +182,24 @@ init([]) ->
 ### Startup Coordination
 ```erlang
 %% Block on critical dependency
-{ok, {_Key, DbPid, _}} = orca:await({global, service, database}, 30000).
+{ok, {_Key, DbPid, _}} = orka:await({global, service, database}, 30000).
 
 %% Subscribe to optional service
-orca:subscribe({global, service, cache}).
+orka:subscribe({global, service, cache}).
 ```
 
 ### Property-Based Queries
 ```erlang
 %% Find services in specific region
-WestServices = orca:find_by_property(region, "us-west").
+WestServices = orka:find_by_property(region, "us-west").
 
 %% Load balance by capacity
-HighCapacity = orca:find_by_property(capacity, 150).
+HighCapacity = orka:find_by_property(capacity, 150).
 ```
 
 ## Comparison with Alternatives
 
-| Feature | Orca | gproc | syn |
+| Feature | Orka | gproc | syn |
 |---------|------|-------|-----|
 | **Speed** | ⚡⚡⚡ Fast | ⚡⚡ Medium | ⚡⚡ Medium |
 | **Local registry** | ✅ | ✅ | ✅ |
@@ -248,21 +248,21 @@ Add to your `rebar.config`:
 
 ```erlang
 {deps, [
-    {orca, {git, "https://github.com/goatrllr/orca.git", {branch, "main"}}}
+    {orka, {git, "https://github.com/goatrllr/orka.git", {branch, "main"}}}
 ]}.
 ```
 
 Or manually:
 
 ```bash
-git clone <repo> deps/orca
-make -C deps/orca
+git clone <repo> deps/orka
+make -C deps/orka
 ```
 
 Then in your application:
 
 ```erlang
-{ok, _} = application:ensure_all_started(orca).
+{ok, _} = application:ensure_all_started(orka).
 ```
 
 ## Project Structure
@@ -270,16 +270,16 @@ Then in your application:
 ```
 orca/
 ├── src/
-│   ├── orca.erl              # Main registry module
-│   └── orca_app.erl          # Application callback
+│   ├── orka.erl              # Main registry module
+│   └── orka_app.erl          # Application callback
 ├── test/
-│   ├── orca_SUITE.erl                  # Core registry tests (main test suite)
-│   ├── orca_app_SUITE.erl              # Application lifecycle tests
-│   ├── orca_concurrency_SUITE.erl      # Concurrent operations tests
-│   ├── orca_extra_SUITE.erl            # Extended feature tests
-│   ├── orca_property_SUITE.erl         # Property-based tests
-│   ├── orca_gpt_regression_SUITE.erl   # GPT-identified issue regressions
-│   └── orca_issue_regression_SUITE.erl # Known issue regressions
+│   ├── orka_SUITE.erl                  # Core registry tests (main test suite)
+│   ├── orka_app_SUITE.erl              # Application lifecycle tests
+│   ├── orka_concurrency_SUITE.erl      # Concurrent operations tests
+│   ├── orka_extra_SUITE.erl            # Extended feature tests
+│   ├── orka_property_SUITE.erl         # Property-based tests
+│   ├── orka_gpt_regression_SUITE.erl   # GPT-identified issue regressions
+│   └── orka_issue_regression_SUITE.erl # Known issue regressions
 ├── ebin/                      # Compiled BEAM files
 │
 ├── API.md                     # API reference (complete documentation)
@@ -298,7 +298,7 @@ orca/
     │
     └── extensions/            # Extension ideas (not yet implemented)
         ├── README.md          # Extension overview
-        ├── orca_syn.md        # Orca + Syn hybrid architecture
+        ├── orka_syn.md        # Orka + Syn hybrid architecture
         ├── groups_examples.md # Process groups patterns
         ├── partial_match_options.md  # Query patterns
         └── message_systems.md # Kafka/RabbitMQ clone architectures
@@ -335,8 +335,8 @@ See [API.md FAQ](API.md#qa-whats-the-difference-between-tags-and-properties)
 
 See [API.md FAQ](API.md#qa-should-i-use-await-or-subscribe)
 
-**Q: Can I use Orca in a distributed system?**
-Orca is local-node only. For multi-node, see [Orca + Syn patterns](docs/extensions/orca_syn.md).
+**Q: Can I use Orka in a distributed system?**
+Orka is local-node only. For multi-node, see [Orka + Syn patterns](docs/extensions/orka_syn.md).
 
 See [API.md FAQ](API.md#faqs) for more.
 
@@ -347,7 +347,7 @@ See [API.md FAQ](API.md#faqs) for more.
 ```erlang
 %% Register user workspace with 5 services
 create_user_workspace(UserId) ->
-    {ok, Entries} = orca:register_batch([
+    {ok, Entries} = orka:register_batch([
         {{global, portfolio, UserId}, Pid1, #{tags => [UserId, portfolio]}},
         {{global, technical, UserId}, Pid2, #{tags => [UserId, technical]}},
         {{global, orders, UserId}, Pid3, #{tags => [UserId, orders]}},
@@ -358,7 +358,7 @@ create_user_workspace(UserId) ->
 
 %% Query all services for user
 get_user_services(UserId) ->
-    orca:entries_by_tag(UserId).
+    orka:entries_by_tag(UserId).
 
 %% Broadcast to all user services
 broadcast_to_user(UserId, Message) ->
@@ -370,8 +370,8 @@ broadcast_to_user(UserId, Message) ->
 
 ```erlang
 check_system_health() ->
-    OnlineServices = orca:count_by_tag(online),
-    CriticalServices = orca:count_by_tag(critical),
+    OnlineServices = orka:count_by_tag(online),
+    CriticalServices = orka:count_by_tag(critical),
     
     case {OnlineServices, CriticalServices} of
         {_, 0} -> {error, critical_services_down};
@@ -385,7 +385,7 @@ check_system_health() ->
 ```erlang
 %% In application start
 start(normal, _Args) ->
-    application:ensure_all_started(orca),
+    application:ensure_all_started(orka),
     my_sup:start_link(),
     
     %% Wait for critical services
@@ -411,7 +411,7 @@ make erl            # Shell
 ```bash
 make ct                              # All tests
 make erl                             # Interactive shell
-ct:run_test("test/orca_SUITE").      # Specific suite
+ct:run_test("test/orka_SUITE").      # Specific suite
 ```
 
 ### Code Style
@@ -441,7 +441,7 @@ MIT - See LICENSE file
 
 - **Documentation**: See [API.md](API.md) and [docs/](docs/)
 - **Examples**: Each doc file includes detailed examples
-- **Tests**: See [test/orca_SUITE.erl](test/orca_SUITE.erl) for implementation examples
+- **Tests**: See [test/orka_SUITE.erl](test/orka_SUITE.erl) for implementation examples
 
 ---
 

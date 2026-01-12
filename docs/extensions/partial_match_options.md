@@ -1,4 +1,4 @@
-# Orca Partial Match Options for Multi-Process Lookups
+# Orka Partial Match Options for Multi-Process Lookups
 
 This document explores patterns for looking up all processes registered for a user/context when using hierarchical key structures and batch registration.
 
@@ -7,7 +7,7 @@ This document explores patterns for looking up all processes registered for a us
 When you batch register multiple services per user:
 
 ```erlang
-{ok, _Entries} = orca:register_batch([
+{ok, _Entries} = orka:register_batch([
     {{global, portfolio, UserId}, PortfolioPid, Meta1},
     {{global, technical, UserId}, TechnicalPid, Meta2},
     {{global, orders, UserId}, OrdersPid, Meta3},
@@ -24,7 +24,7 @@ Use a common tag for all user services, enabling prefix-like queries via tags.
 ```erlang
 %% Registration
 register_user_services(UserId) ->
-    {ok, _Entries} = orca:register_batch([
+    {ok, _Entries} = orka:register_batch([
         {{global, portfolio, UserId}, PortfolioPid, #{
             tags => [UserId, portfolio, user_service],
             properties => #{user_id => UserId, service_type => portfolio}
@@ -43,35 +43,35 @@ register_user_services(UserId) ->
         }}
     ]).
 
-%% Queries - All existing orca functions work!
+%% Queries - All existing orka functions work!
 
 %% Get all services for a user (fast - O(1) with tag index)
 all_services_for_user(UserId) ->
-    orca:entries_by_tag(UserId).
+    orka:entries_by_tag(UserId).
 
 %% Get all portfolio services (across all users)
 all_portfolio_services() ->
-    orca:entries_by_tag(portfolio).
+    orka:entries_by_tag(portfolio).
 
 %% Get only portfolio service for a specific user
 portfolio_for_user(UserId) ->
-    AllUserServices = orca:entries_by_tag(UserId),
+    AllUserServices = orka:entries_by_tag(UserId),
     [Pid || {_Key, Pid, Meta} <- AllUserServices,
             lists:member(portfolio, maps:get(tags, Meta, []))].
 
 %% Count services for a user
 user_service_count(UserId) ->
-    orca:count_by_tag(UserId).
+    orka:count_by_tag(UserId).
 
 %% Get "healthy" services for a user (assuming you add healthy tag)
 healthy_user_services(UserId) ->
-    UserServices = orca:entries_by_tag(UserId),
+    UserServices = orka:entries_by_tag(UserId),
     [Pid || {_Key, Pid, Meta} <- UserServices,
             lists:member(healthy, maps:get(tags, Meta, []))].
 
 %% Get service distribution by user
 service_stats_for_user(UserId) ->
-    Entries = orca:entries_by_tag(UserId),
+    Entries = orka:entries_by_tag(UserId),
     #{
         total => length(Entries),
         by_type => count_by_service_type(Entries)
@@ -85,7 +85,7 @@ count_by_service_type(Entries) ->
 ```
 
 **Pros**:
-- ✓ Uses existing orca functions (no new code)
+- ✓ Uses existing orka functions (no new code)
 - ✓ Fast: O(1) via tag index
 - ✓ Flexible: Can query by user OR by service type OR both
 - ✓ Rich filtering: Combine with other tags
@@ -95,7 +95,7 @@ count_by_service_type(Entries) ->
 **Cons**:
 - ✗ Slightly more metadata per entry
 
-**Best for**: Most use cases. Clean, efficient, leverages orca's strengths.
+**Best for**: Most use cases. Clean, efficient, leverages orka's strengths.
 
 ---
 
@@ -109,7 +109,7 @@ register_user_workspace(UserId) ->
     {ok, WorkspacePid} = user_workspace:start_link(UserId),
     
     %% Register all services for this user
-    {ok, ServiceEntries} = orca:register_batch([
+    {ok, ServiceEntries} = orka:register_batch([
         {{global, portfolio, UserId}, PortfolioPid, #{tags => [UserId]}},
         {{global, technical, UserId}, TechnicalPid, #{tags => [UserId]}},
         {{global, orders, UserId}, OrdersPid, #{tags => [UserId]}},
@@ -120,7 +120,7 @@ register_user_workspace(UserId) ->
     ServicePids = [Pid || {_Key, Pid, _Meta} <- ServiceEntries],
     
     %% Store reference in workspace metadata
-    orca:register({global, user_workspace, UserId}, WorkspacePid, #{
+    orka:register({global, user_workspace, UserId}, WorkspacePid, #{
         tags => [user, workspace],
         properties => #{
             child_services => ServicePids,
@@ -132,7 +132,7 @@ register_user_workspace(UserId) ->
 
 %% Later: lookup workspace to get services
 get_user_services(UserId) ->
-    case orca:lookup({global, user_workspace, UserId}) of
+    case orka:lookup({global, user_workspace, UserId}) of
         {ok, {_Key, _Pid, Meta}} ->
             maps:get(child_services, maps:get(properties, Meta, #{}), []);
         not_found ->
@@ -157,10 +157,10 @@ get_user_services(UserId) ->
 
 ## Approach 3: Partial Key Matching (Optional Enhancement)
 
-Add a `lookup_prefix/1` function to orca for hierarchical key structures.
+Add a `lookup_prefix/1` function to orka for hierarchical key structures.
 
 ```erlang
-%% Add to orca.erl exports
+%% Add to orka.erl exports
 -export([lookup_prefix/1]).
 
 %% New function
@@ -202,15 +202,15 @@ fill_pattern(Pattern, _Prefix, _Pos) ->
 
 %% Get all services for a user (with hierarchical keys)
 user_services_hierarchical(UserId) ->
-    orca:lookup_prefix({global, user, UserId}).
+    orka:lookup_prefix({global, user, UserId}).
 
 %% Get all jobs in a specific job queue
 jobs_in_queue(QueueId) ->
-    orca:lookup_prefix({global, job_queue, QueueId}).
+    orka:lookup_prefix({global, job_queue, QueueId}).
 
 %% Get all sessions for a specific app
 sessions_for_app(AppId) ->
-    orca:lookup_prefix({global, session, AppId}).
+    orka:lookup_prefix({global, session, AppId}).
 ```
 
 **Key Structure for this to work**:
@@ -222,7 +222,7 @@ sessions_for_app(AppId) ->
 {{global, user, user123, risk}, RiskPid, Meta}
 
 %% Then query with:
-orca:lookup_prefix({global, user, user123})
+orka:lookup_prefix({global, user, user123})
 %% Returns all 4 entries
 ```
 
@@ -248,7 +248,7 @@ Use properties with `find_by_property/3` for multi-dimensional queries.
 
 ```erlang
 register_user_services(UserId) ->
-    {ok, Entries} = orca:register_batch([
+    {ok, Entries} = orka:register_batch([
         {{global, portfolio, UserId}, PortfolioPid, #{
             tags => [user_service],
             properties => #{
@@ -287,28 +287,28 @@ register_user_services(UserId) ->
 
 %% Get all services for user (by property)
 all_services_for_user(UserId) ->
-    orca:find_by_property(user_id, UserId).
+    orka:find_by_property(user_id, UserId).
 
 %% Get active services for user
 active_services_for_user(UserId) ->
-    AllServices = orca:find_by_property(user_id, UserId),
+    AllServices = orka:find_by_property(user_id, UserId),
     [Pid || {_Key, Pid, Meta} <- AllServices,
             maps:get(status, maps:get(properties, Meta, #{}), undefined) =:= active].
 
 %% Get specific service type for user
 portfolio_for_user(UserId) ->
-    AllUserServices = orca:find_by_property(user_id, UserId),
+    AllUserServices = orka:find_by_property(user_id, UserId),
     [Pid || {_Key, Pid, Meta} <- AllUserServices,
             maps:get(service_type, maps:get(properties, Meta, #{})) =:= portfolio].
 
 %% Get all users (unique user_ids from property index)
 all_users() ->
-    Stats = orca:property_stats(service, user_id),
+    Stats = orka:property_stats(service, user_id),
     maps:keys(Stats).
 
 %% Get user service count
 user_service_count(UserId) ->
-    Services = orca:find_by_property(user_id, UserId),
+    Services = orka:find_by_property(user_id, UserId),
     length(Services).
 ```
 
@@ -343,7 +343,7 @@ user_service_count(UserId) ->
 
 %% Register all trading services for a user
 create_workspace(UserId) ->
-    {ok, Entries} = orca:register_batch([
+    {ok, Entries} = orka:register_batch([
         {{global, portfolio, UserId}, PortfolioPid, #{
             tags => [UserId, portfolio, trading],
             properties => #{service_type => portfolio}
@@ -371,25 +371,25 @@ create_workspace(UserId) ->
 
 %% All services for a user
 all_user_services(UserId) ->
-    orca:entries_by_tag(UserId).
+    orka:entries_by_tag(UserId).
 
 %% Specific service for user
 get_user_service(UserId, ServiceType) ->
-    AllUserServices = orca:entries_by_tag(UserId),
+    AllUserServices = orka:entries_by_tag(UserId),
     [Pid || {_Key, Pid, Meta} <- AllUserServices,
             maps:get(service_type, maps:get(properties, Meta, #{})) =:= ServiceType].
 
 %% All portfolio services (across all users)
 all_portfolios() ->
-    orca:entries_by_tag(portfolio).
+    orka:entries_by_tag(portfolio).
 
 %% Statistics
 user_service_count(UserId) ->
-    orca:count_by_tag(UserId).
+    orka:count_by_tag(UserId).
 ```
 
 **Why Approach 1 is best**:
-- ✓ Uses orca's strongest feature: tag indexing
+- ✓ Uses orka's strongest feature: tag indexing
 - ✓ No new code needed
 - ✓ Fast O(1) lookups
 - ✓ Can query by user OR by service type

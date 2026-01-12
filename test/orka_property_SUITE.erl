@@ -1,4 +1,4 @@
--module(orca_property_SUITE).
+-module(orka_property_SUITE).
 
 %% Common Test callbacks
 -export([all/0, init_per_suite/1, end_per_suite/1]).
@@ -20,20 +20,20 @@ all() ->
 	].
 
 init_per_suite(Config) ->
-	catch application:stop(orca),
+	catch application:stop(orka),
 	timer:sleep(50),
-	ok = application:start(orca),
+	ok = application:start(orka),
 	timer:sleep(100),
 	Config.
 
 end_per_suite(_Config) ->
-	application:stop(orca),
+	application:stop(orka),
 	ok.
 
 init_per_testcase(_TestCase, Config) ->
-	catch application:stop(orca),
+	catch application:stop(orka),
 	timer:sleep(100),
-	ok = application:start(orca),
+	ok = application:start(orka),
 	timer:sleep(100),
 	Config.
 
@@ -42,23 +42,23 @@ end_per_testcase(_TestCase, _Config) ->
 
 %% @doc Property: tag index is consistent with metadata tags
 test_prop_tag_index_consistent(Config) ->
-	ok = ensure_orca_started(),
+	ok = ensure_orka_started(),
 	true = proper:quickcheck(prop_tag_index_consistent(), [{numtests, 50}]),
 	Config.
 
 %% @doc Property: property index is consistent with metadata properties
 test_prop_property_index_consistent(Config) ->
-	ok = ensure_orca_started(),
+	ok = ensure_orka_started(),
 	true = proper:quickcheck(prop_property_index_consistent(), [{numtests, 50}]),
 	Config.
 
-ensure_orca_started() ->
-	case whereis(orca) of
+ensure_orka_started() ->
+	case whereis(orka) of
 		undefined ->
-			case application:ensure_all_started(orca) of
+			case application:ensure_all_started(orka) of
 				{ok, _} -> ok;
-				{error, {already_started, orca}} -> ok;
-				{error, Reason} -> exit({orca_start_failed, Reason})
+				{error, {already_started, orka}} -> ok;
+				{error, Reason} -> exit({orka_start_failed, Reason})
 			end,
 			timer:sleep(50),
 			ok;
@@ -69,31 +69,31 @@ ensure_orca_started() ->
 prop_tag_index_consistent() ->
 	?FORALL({Id, Tags0}, {pos_integer(), list(tag_gen())},
 		begin
-			ok = ensure_orca_started(),
+			ok = ensure_orka_started(),
 			Key = {global, service, {Id, make_ref()}},
 			Tags = lists:usort(Tags0),
 			Meta = #{tags => Tags},
-			{ok, _} = orca:register(Key, self(), Meta),
+			{ok, _} = orka:register(Key, self(), Meta),
 			TagChecks = lists:all(fun(Tag) ->
-				Entries = orca:entries_by_tag(Tag),
+				Entries = orka:entries_by_tag(Tag),
 				lists:any(fun({K, _, _}) -> K =:= Key end, Entries)
 			end, Tags),
-			ok = orca:unregister(Key),
+			ok = orka:unregister(Key),
 			TagChecks
 		end).
 
 prop_property_index_consistent() ->
 	?FORALL({Id, Props}, {pos_integer(), properties_gen()},
 		begin
-			ok = ensure_orca_started(),
+			ok = ensure_orka_started(),
 			Key = {global, service, {Id, make_ref()}},
 			Meta = #{properties => Props},
-			{ok, _} = orca:register(Key, self(), Meta),
+			{ok, _} = orka:register(Key, self(), Meta),
 			PropChecks = maps:fold(fun(Name, Value, Acc) ->
-				Entries = orca:find_by_property(Name, Value),
+				Entries = orka:find_by_property(Name, Value),
 				Acc andalso lists:any(fun({K, _, _}) -> K =:= Key end, Entries)
 			end, true, Props),
-			ok = orca:unregister(Key),
+			ok = orka:unregister(Key),
 			PropChecks
 		end).
 

@@ -1,8 +1,8 @@
--module(orca_issue_regression_SUITE).
+-module(orka_issue_regression_SUITE).
 
 
 % Implemented to fix and align singleton/property behavior. 
-% Key changes are in orca.erl.
+% Key changes are in orka.erl.
 
 % What changed and why
 
@@ -33,20 +33,20 @@ all() ->
 	].
 
 init_per_suite(Config) ->
-	catch application:stop(orca),
+	catch application:stop(orka),
 	timer:sleep(50),
-	ok = application:start(orca),
+	ok = application:start(orka),
 	timer:sleep(100),
 	Config.
 
 end_per_suite(_Config) ->
-	application:stop(orca),
+	application:stop(orka),
 	ok.
 
 init_per_testcase(_TestCase, Config) ->
-	catch application:stop(orca),
+	catch application:stop(orka),
 	timer:sleep(100),
-	ok = application:start(orca),
+	ok = application:start(orka),
 	timer:sleep(100),
 	Config.
 
@@ -59,8 +59,8 @@ test_singleton_cannot_be_bypassed_via_register(Config) ->
 	Key2 = {global, service, singleton_b},
 	Pid = spawn(fun() -> receive after 10000 -> ok end end),
 
-	{ok, _} = orca:register_single(Key1, Pid, #{tags => [service]}),
-	Result = orca:register(Key2, Pid, #{tags => [service]}),
+	{ok, _} = orka:register_single(Key1, Pid, #{tags => [service]}),
+	Result = orka:register(Key2, Pid, #{tags => [service]}),
 	case Result of
 		{error, _} -> ok;
 		_ -> ct:fail({expected_error, Result})
@@ -72,11 +72,11 @@ test_register_with_does_not_overwrite(Config) ->
 	Key = {global, service, register_with_key},
 	Pid1 = spawn(fun() -> receive after 10000 -> ok end end),
 
-	{ok, _} = orca:register(Key, Pid1, #{tags => [service]}),
+	{ok, _} = orka:register(Key, Pid1, #{tags => [service]}),
 	SpawnFun = fun() -> receive after 10000 -> ok end end,
-	{ok, {Key, Pid1, _}} = orca:register_with(Key, #{tags => [service]}, {erlang, spawn, [SpawnFun]}),
+	{ok, {Key, Pid1, _}} = orka:register_with(Key, #{tags => [service]}, {erlang, spawn, [SpawnFun]}),
 
-	{ok, {Key, LookupPid, _}} = orca:lookup(Key),
+	{ok, {Key, LookupPid, _}} = orka:lookup(Key),
 	case LookupPid =:= Pid1 of
 		true -> ok;
 		false -> ct:fail({expected_existing_pid, Pid1, got, LookupPid})
@@ -88,8 +88,8 @@ test_find_by_property_reads_metadata(Config) ->
 	Key = {global, user, "meta_prop"},
 	Metadata = #{tags => [user], properties => #{region => "us-west"}},
 
-	{ok, _} = orca:register(Key, self(), Metadata),
-	Entries = orca:find_by_property(region, "us-west"),
+	{ok, _} = orka:register(Key, self(), Metadata),
+	Entries = orka:find_by_property(region, "us-west"),
 	case lists:keyfind(Key, 1, Entries) of
 		false -> ct:fail({expected_entry, Key, Entries});
 		_ -> ok

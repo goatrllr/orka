@@ -1,17 +1,17 @@
-# Orca + Syn: Hybrid Architecture for Distributed Environments
+# Orka + Syn: Hybrid Architecture for Distributed Environments
 
-This document describes patterns for integrating orca (local, fast registry) with syn (distributed, eventually consistent) to handle multi-node deployments while maintaining both performance and eventual consistency.
+This document describes patterns for integrating orka (local, fast registry) with syn (distributed, eventually consistent) to handle multi-node deployments while maintaining both performance and eventual consistency.
 
 ## The Challenge
 
-**Orca alone**: Fast local registry, no distribution.
+**Orka alone**: Fast local registry, no distribution.
 **Syn alone**: Distributed but eventually consistent, can be slower.
 **Combined**: Get the best of both worlds.
 
 ```
 Node A                          Node B
 ┌─────────────────┐            ┌─────────────────┐
-│ Local Orca      │            │ Local Orca      │
+│ Local Orka      │            │ Local Orka      │
 │ ┌─────────────┐ │            │ ┌─────────────┐ │
 │ │ Portfolio   │ │            │ │ Portfolio   │ │
 │ │ Technical   │ │            │ │ Technical   │ │
@@ -30,19 +30,19 @@ Node A                          Node B
 
 **Local-first with eventual consistency for discovery**:
 
-1. Service registers locally via orca (immediate, fast)
+1. Service registers locally via orka (immediate, fast)
 2. Service also joins syn group (eventual consistency across cluster)
-3. Queries prefer local orca, fall back to syn when needed
+3. Queries prefer local orka, fall back to syn when needed
 
 ---
 
 ## Implementation Strategy
 
-### Integration Layer: orca_syn_bridge
+### Integration Layer: orka_syn_bridge
 
 ```erlang
-%% orca_syn_bridge.erl - Integration layer
--module(orca_syn_bridge).
+%% orka_syn_bridge.erl - Integration layer
+-module(orka_syn_bridge).
 -export([register_service/3, lookup_service/2, get_all_services/1]).
 -export([subscribe_remote/1, unsubscribe_remote/1]).
 
@@ -50,7 +50,7 @@ Node A                          Node B
 %% Immediate local availability + eventual global consistency
 register_service(Key, Pid, Metadata) ->
     %% 1. Register locally (immediate)
-    {ok, LocalEntry} = orca:register(Key, Pid, Metadata),
+    {ok, LocalEntry} = orka:register(Key, Pid, Metadata),
     
     %% 2. Join syn group (eventually consistent)
     GroupKey = extract_group_key(Key),
@@ -71,7 +71,7 @@ extract_group_key({global, {Type, SubType}, Name}) ->
 
 %% Lookup: Try local first, then query globally if needed
 lookup_service(Key, Strategy) ->
-    case orca:lookup(Key) of
+    case orka:lookup(Key) of
         {ok, Entry} ->
             {ok, local, Entry};
         not_found when Strategy =:= local_only ->
@@ -95,7 +95,7 @@ lookup_global(Key) ->
 %% Get all services of a type (local + remote)
 get_all_services(Type) ->
     %% Local services
-    LocalEntries = orca:entries_by_tag(Type),
+    LocalEntries = orka:entries_by_tag(Type),
     LocalPids = [Pid || {_Key, Pid, _Meta} <- LocalEntries],
     
     %% Remote services from syn
@@ -132,7 +132,7 @@ Prefer local instances (fast, strong consistency), fall back to remote if local 
 
 %% Get translator service with fallback
 get_translator_service(Strategy) ->
-    case orca:lookup({global, service, translator}) of
+    case orka:lookup({global, service, translator}) of
         {ok, {_Key, Pid, _Meta}} ->
             {ok, local, Pid};
         not_found when Strategy =:= failover ->
@@ -171,7 +171,7 @@ Register service locally and in global group, query across cluster.
 
 %% Register user service both locally and globally
 register_user_service(UserId, ServiceType) ->
-    {ok, Entry} = orca_syn_bridge:register_service(
+    {ok, Entry} = orka_syn_bridge:register_service(
         {global, {user, UserId}, ServiceType},
         self(),
         #{
@@ -186,7 +186,7 @@ get_user_services_global(UserId) ->
     GroupKey = {user, UserId},
     
     %% Local (immediate)
-    LocalEntries = orca:entries_by_tag(UserId),
+    LocalEntries = orka:entries_by_tag(UserId),
     LocalPids = [Pid || {_Key, Pid, _Meta} <- LocalEntries],
     
     %% Remote (eventual)
@@ -197,7 +197,7 @@ get_user_services_global(UserId) ->
 
 %% Get specific service type for user
 get_user_service(UserId, ServiceType) ->
-    case orca:lookup({global, {user, UserId}, ServiceType}) of
+    case orka:lookup({global, {user, UserId}, ServiceType}) of
         {ok, {_K, Pid, _M}} ->
             {ok, local, Pid};
         not_found ->
@@ -226,7 +226,7 @@ Choose consistency level based on use case.
 %% Strong consistency: Local only
 %% Perfect for: Configuration, critical state
 get_portfolio(UserId) ->
-    case orca:await({global, portfolio, UserId}, 5000) of
+    case orka:await({global, portfolio, UserId}, 5000) of
         {ok, {_K, Pid, _Meta}} -> 
             {ok, Pid};
         {error, timeout} -> 
@@ -237,7 +237,7 @@ get_portfolio(UserId) ->
 %% Perfect for: Discovery, multi-instance lookups
 get_all_execution_nodes(UserId) ->
     %% Local executions
-    LocalExecs = orca:entries_by_tag({execution, UserId}),
+    LocalExecs = orka:entries_by_tag({execution, UserId}),
     LocalPids = [P || {_K, P, _M} <- LocalExecs],
     
     %% Remote executions (might be slightly stale)
@@ -250,7 +250,7 @@ get_all_execution_nodes(UserId) ->
 get_service_with_timeout(ServiceKey, Timeout) ->
     LocalDeadline = erlang:system_time(millisecond) + (Timeout div 2),
     
-    case orca:lookup(ServiceKey) of
+    case orka:lookup(ServiceKey) of
         {ok, Entry} ->
             {ok, local, Entry};
         not_found ->
@@ -304,7 +304,7 @@ Multi-node trading workspace with per-user distributed service groups.
 
 %% Create workspace: register on local node + join global group
 create_workspace(UserId) ->
-    {ok, Entries} = orca:register_batch([
+    {ok, Entries} = orka:register_batch([
         {{global, portfolio, UserId}, PortfolioPid, #{
             tags => [UserId, portfolio],
             properties => #{service_type => portfolio, node => node()}
@@ -344,7 +344,7 @@ create_workspace(UserId) ->
 %% Get services: local (fast) + remote (eventual)
 get_workspace_services(UserId) ->
     %% Local (immediate, strong consistency)
-    LocalEntries = orca:entries_by_tag(UserId),
+    LocalEntries = orka:entries_by_tag(UserId),
     LocalPids = [{local, Pid, ServiceType} || {_K, Pid, Meta} <- LocalEntries,
                                                ServiceType <- [get_service_type_from_meta(Meta)]],
     
@@ -362,7 +362,7 @@ get_workspace_services(UserId) ->
 
 %% Broadcast to local workspace (guaranteed delivery)
 broadcast_to_workspace(UserId, Message) ->
-    LocalServices = orca:entries_by_tag(UserId),
+    LocalServices = orka:entries_by_tag(UserId),
     lists:foreach(fun({_Key, Pid, _Meta}) ->
         Pid ! {workspace_message, UserId, Message}
     end, LocalServices).
@@ -390,7 +390,7 @@ get_service_type_from_meta(Meta) ->
 
 ## Consistency Guarantees
 
-| Operation | Local (Orca) | Global (Syn) | Hybrid Approach |
+| Operation | Local (Orka) | Global (Syn) | Hybrid Approach |
 |-----------|--------------|--------------|-----------------|
 | **Register** | Immediate | Eventual (~100ms) | Atomic locally, async globally |
 | **Lookup** | Strong ✓ | Eventual | Local-first, remote fallback |
@@ -404,11 +404,11 @@ get_service_type_from_meta(Meta) ->
 ## Key Design Decisions
 
 ### 1. **Local-First Always**
-Orca is the source of truth for the local node. Never rely solely on syn for local operations.
+Orka is the source of truth for the local node. Never rely solely on syn for local operations.
 
 ```erlang
 %% GOOD: Try local first
-case orca:lookup(Key) of
+case orka:lookup(Key) of
     {ok, Entry} -> Entry;
     not_found -> syn:get_members(GroupKey)
 end.
@@ -423,7 +423,7 @@ Use syn when you need to find services on other nodes or get a complete cluster-
 ```erlang
 %% Find any service (local preferred, remote fallback)
 get_service(Key) ->
-    case orca:lookup(Key) of
+    case orka:lookup(Key) of
         {ok, Entry} -> {ok, local, Entry};
         not_found -> {ok, remote, get_remote(Key)}
     end.
@@ -434,22 +434,22 @@ Global state may lag. This is acceptable for discovery but not for critical oper
 
 ```erlang
 %% OK: Finding a pool of workers (eventual consistency acceptable)
-AllWorkers = orca:entries_by_tag(worker) ++ syn:get_members(worker_group),
+AllWorkers = orka:entries_by_tag(worker) ++ syn:get_members(worker_group),
 
 %% NOT OK: Getting the one portfolio (needs strong consistency)
-orca:await({global, portfolio, UserId}, 5000).
+orka:await({global, portfolio, UserId}, 5000).
 ```
 
 ### 4. **No Replication**
-Each node has an independent orca registry. Don't try to replicate data across nodes manually.
+Each node has an independent orka registry. Don't try to replicate data across nodes manually.
 
 ```erlang
 %% CORRECT: Each node registers its own services
-orca:register({global, portfolio, UserId}, PortfolioPid, Meta),
+orka:register({global, portfolio, UserId}, PortfolioPid, Meta),
 syn:join({user, UserId}, PortfolioPid, Meta).
 
 %% WRONG: Don't store lists of remote Pids
-orca:register(user_key, WorkspacePid, #{
+orka:register(user_key, WorkspacePid, #{
     child_pids => [RemotePid1, RemotePid2, ...]  %% Gets stale!
 }).
 ```
@@ -459,7 +459,7 @@ Always have a fallback when using remote services.
 
 ```erlang
 get_service(Key) ->
-    case orca:lookup(Key) of
+    case orka:lookup(Key) of
         {ok, {_K, Pid, _M}} -> 
             Pid;
         not_found -> 
@@ -479,7 +479,7 @@ get_service(Key) ->
 ```erlang
 %% In your_app.erl
 start(normal, _Args) ->
-    {ok, _} = application:ensure_all_started(orca),
+    {ok, _} = application:ensure_all_started(orka),
     {ok, _} = application:ensure_all_started(syn),
     {ok, _} = application:ensure_all_started(your_app),
     
@@ -489,8 +489,8 @@ start(normal, _Args) ->
 ### 2. Register Services
 
 ```erlang
-%% Local registration (both orca + syn)
-orca_syn_bridge:register_service(
+%% Local registration (both orka + syn)
+orka_syn_bridge:register_service(
     {global, portfolio, UserId},
     PortfolioPid,
     #{tags => [UserId, portfolio]}
@@ -501,7 +501,7 @@ orca_syn_bridge:register_service(
 
 ```erlang
 %% Local-first strategy
-case orca:lookup(Key) of
+case orka:lookup(Key) of
     {ok, Entry} -> handle_local(Entry);
     not_found -> handle_remote(Key)
 end.
@@ -519,9 +519,9 @@ broadcast_to_global_workspace(UserId, Message).
 
 ---
 
-## Comparison: Orca vs Syn vs Hybrid
+## Comparison: Orka vs Syn vs Hybrid
 
-| Feature | Orca | Syn | Hybrid |
+| Feature | Orka | Syn | Hybrid |
 |---------|------|-----|--------|
 | **Speed** | ⚡⚡⚡ Fast | ⚡⚡ Medium | ⚡⚡⚡ Fast locally, medium globally |
 | **Consistency** | Strong local | Eventual | Hybrid per operation |
@@ -550,7 +550,7 @@ trading_workspace_distributed:create_workspace(trader_001),
 %% Registers locally + joins global group {user_workspace, trader_001}
 
 %% Node C: Register execution engine
-orca_syn_bridge:register_service(
+orka_syn_bridge:register_service(
     {global, execution, trader_001},
     ExecutionPid,
     #{tags => [trader_001, execution, trading]}
@@ -562,11 +562,11 @@ orca_syn_bridge:register_service(
 ```erlang
 %% Node A: Get portfolio (local strong consistency)
 get_portfolio(trader_001) ->
-    orca:await({global, portfolio, trader_001}, 5000).
+    orka:await({global, portfolio, trader_001}, 5000).
 
 %% Node B: Find any execution engine for trader (eventual consistency)
 get_execution_engine(trader_001) ->
-    case orca:lookup({global, execution, trader_001}) of
+    case orka:lookup({global, execution, trader_001}) of
         {ok, Entry} -> {ok, local, Entry};
         not_found ->
             Members = syn:get_members({execution, trader_001}),
@@ -588,24 +588,24 @@ broadcast_order(trader_001, Order) ->
 
 ## Migration Path
 
-### Phase 1: Single-node (Orca only)
+### Phase 1: Single-node (Orka only)
 ```erlang
-orca:register({global, portfolio, user_id}, Pid, Meta).
-orca:lookup({global, portfolio, user_id}).
+orka:register({global, portfolio, user_id}, Pid, Meta).
+orka:lookup({global, portfolio, user_id}).
 ```
 
-### Phase 2: Add Distribution (Orca + Syn)
+### Phase 2: Add Distribution (Orka + Syn)
 ```erlang
-orca_syn_bridge:register_service({global, portfolio, user_id}, Pid, Meta).
-orca_syn_bridge:lookup_service({global, portfolio, user_id}, global).
+orka_syn_bridge:register_service({global, portfolio, user_id}, Pid, Meta).
+orka_syn_bridge:lookup_service({global, portfolio, user_id}, global).
 ```
 
 ### Phase 3: Optimize Queries
 ```erlang
 %% Use local-first strategy
-case orca:lookup(Key) of
+case orka:lookup(Key) of
     {ok, Entry} -> Entry;
-    not_found -> {ok, _Src, RemoteEntry} = orca_syn_bridge:lookup_service(Key, global)
+    not_found -> {ok, _Src, RemoteEntry} = orka_syn_bridge:lookup_service(Key, global)
 end.
 ```
 
@@ -618,9 +618,9 @@ end.
 **Solution**: Always check local first, then remote. Accept eventual consistency for global queries.
 
 ### Issue: Broadcast not reaching all services
-**Cause**: Mixing orca broadcast (local) and syn broadcast (eventual)
+**Cause**: Mixing orka broadcast (local) and syn broadcast (eventual)
 **Solution**: Use separate functions for different consistency needs.
 
 ### Issue: Too much metadata duplication
-**Cause**: Storing same metadata in both orca and syn
+**Cause**: Storing same metadata in both orka and syn
 **Solution**: Store minimal metadata in syn, use tags for filtering.

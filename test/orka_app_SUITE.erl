@@ -1,4 +1,4 @@
--module(orca_app_SUITE).
+-module(orka_app_SUITE).
 
 %% Callbacks
 -export([all/0, init_per_suite/1, end_per_suite/1]).
@@ -28,19 +28,19 @@ all() ->
 
 init_per_suite(Config) ->
 	%% Ensure application is stopped before tests
-	application:stop(orca),
+	application:stop(orka),
 	timer:sleep(100),
 	Config.
 
 end_per_suite(_Config) ->
-	application:stop(orca),
+	application:stop(orka),
 	ok.
 
 init_per_testcase(_TestCase, Config) ->
 	Config.
 
 end_per_testcase(_TestCase, _Config) ->
-	application:stop(orca),
+	application:stop(orka),
 	timer:sleep(100),
 	ok.
 
@@ -50,21 +50,21 @@ end_per_testcase(_TestCase, _Config) ->
 
 %% @doc Test that application starts successfully
 test_application_start(Config) ->
-	ok = application:start(orca),
+	ok = application:start(orka),
 	timer:sleep(100),
 
 	%% Verify registry is running
-	true = is_pid(whereis(orca)),
+	true = is_pid(whereis(orka)),
 
 	ct:log("✓ Application started successfully"),
 	Config.
 
 %% @doc Test that application stops cleanly
 test_application_stop(Config) ->
-	ok = application:start(orca),
+	ok = application:start(orka),
 	timer:sleep(100),
 
-	ok = application:stop(orca),
+	ok = application:stop(orka),
 	timer:sleep(100),
 
 	ct:log("✓ Application stopped successfully"),
@@ -72,29 +72,29 @@ test_application_stop(Config) ->
 
 %% @doc Test supervisor tree structure
 test_supervisor_tree(Config) ->
-	ok = application:start(orca),
+	ok = application:start(orka),
 	timer:sleep(100),
 
 	%% Verify supervisor is running
-	true = is_pid(whereis(orca_sup)),
+	true = is_pid(whereis(orka_sup)),
 
 	%% Verify registry GenServer is running
-	true = is_pid(whereis(orca)),
+	true = is_pid(whereis(orka)),
 
-	%% Check that supervisor has orca as a child
-	Pids = supervisor:which_children(orca_sup),
+	%% Check that supervisor has orka as a child
+	Pids = supervisor:which_children(orka_sup),
 	true = length(Pids) >= 1,
 
-	%% Verify orca is in the children list
+	%% Verify orka is in the children list
 	ChildIds = [Id || {Id, _Pid, _Type, _Modules} <- Pids],
-	true = lists:member(orca, ChildIds),
+	true = lists:member(orka, ChildIds),
 
 	ct:log("✓ Supervisor tree correctly configured"),
 	Config.
 
 %% @doc Test that registry is available after application starts
 test_registry_available_after_start(Config) ->
-	ok = application:start(orca),
+	ok = application:start(orka),
 	timer:sleep(100),
 
 	%% Try to register something
@@ -102,10 +102,10 @@ test_registry_available_after_start(Config) ->
 	Pid = self(),
 	Metadata = #{test => true},
 
-	{ok, {Key, Pid, Metadata}} = orca:register(Key, Pid, Metadata),
+	{ok, {Key, Pid, Metadata}} = orka:register(Key, Pid, Metadata),
 
 	%% Verify we can look it up
-	{ok, {Key, Pid, Metadata}} = orca:lookup(Key),
+	{ok, {Key, Pid, Metadata}} = orka:lookup(Key),
 
 	ct:log("✓ Registry is fully operational after start"),
 	Config.

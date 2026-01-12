@@ -1,12 +1,12 @@
-# Orca Documentation
+# Orka Documentation
 
 <div align="center">
 
-![Orca Logo](images/orca_logo.png)
+![Orka Logo](images/orka_logo.png)
 
 </div>
 
-Complete documentation for the Orca ETS-based process registry.
+Complete documentation for the Orka ETS-based process registry.
 
 ## Main Documentation
 
@@ -76,11 +76,11 @@ Startup coordination deep-dive with 7 detailed examples:
 
 ### 5. **[Comparison with Alternatives](comparison.md)**
 
-How Orca compares to other process registries:
+How Orka compares to other process registries:
 
 - **gproc**: Global process registry (built-in, older)
 - **syn**: Distributed process groups (cluster-aware)
-- **Orca**: ETS-based, high-performance, local-node
+- **Orka**: ETS-based, high-performance, local-node
 
 Including:
 - Feature comparison table
@@ -88,7 +88,7 @@ Including:
 - When to use each
 - Migration paths
 
-**When to read**: Evaluating whether Orca is right for your use case.
+**When to read**: Evaluating whether Orka is right for your use case.
 
 ## Quick Reference
 
@@ -128,7 +128,7 @@ All examples and patterns have been tested:
 - **71/71 tests passing** in Common Test suite
 - Coverage includes: registration, lookups, tags, properties, singleton, await, subscribe, batch operations
 
-See `test/orca_SUITE.erl` for test implementations.
+See `test/orka_SUITE.erl` for test implementations.
 
 ## Performance Notes
 
@@ -140,7 +140,7 @@ Not suitable for per-message operations, but excellent for service discovery and
 
 ## Architecture Notes
 
-Orca uses:
+Orka uses:
 - **ETS public tables** for lock-free reads
 - **gen_server** for atomic writes with monitors
 - **Process monitors** for automatic cleanup

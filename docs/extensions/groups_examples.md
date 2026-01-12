@@ -1,11 +1,11 @@
-# Orca Process Groups - Global Group Manager
+# Orka Process Groups - Global Group Manager
 
-Orca can function as a **Global Process Group manager**, similar to syn's group functionality. This document shows how to use orca's tag and property system to implement process groups with rich querying capabilities.
+Orka can function as a **Global Process Group manager**, similar to syn's group functionality. This document shows how to use orka's tag and property system to implement process groups with rich querying capabilities.
 
 ## Overview
 
 Process groups allow you to:
-1. **Register a process under a group key** - managed by orca with `register/2`
+1. **Register a process under a group key** - managed by orka with `register/2`
 2. **Query all processes in a group** - via `entries_by_tag/1` or `find_by_property/2`
 3. **Get group membership** - filter by tags or properties
 4. **Monitor group membership** - automatic cleanup on process crash
@@ -21,7 +21,7 @@ Process groups allow you to:
 %% Join a group
 join(GroupName) ->
     Key = {global, group, {GroupName, self()}},
-    orca:register(Key, self(), #{
+    orka:register(Key, self(), #{
         tags => [GroupName, group_member],
         properties => #{group => GroupName}
     }).
@@ -29,11 +29,11 @@ join(GroupName) ->
 %% Leave group
 leave(GroupName) ->
     Key = {global, group, {GroupName, self()}},
-    orca:unregister(Key).
+    orka:unregister(Key).
 
 %% Get all members of group
 members(GroupName) ->
-    Entries = orca:entries_by_tag(GroupName),
+    Entries = orka:entries_by_tag(GroupName),
     [Pid || {_Key, Pid, _Meta} <- Entries].
 ```
 
@@ -50,7 +50,7 @@ Pids = process_group:members(workers),
 ```
 
 **Pros**:
-- Simple, direct mapping to orca's tag system
+- Simple, direct mapping to orka's tag system
 - Automatic cleanup on process crash
 - Fast queries with `entries_by_tag/1`
 
@@ -69,7 +69,7 @@ Pids = process_group:members(workers),
 %% Join a group with metadata
 join(GroupName, Metadata) ->
     Key = {global, group, {GroupName, self()}},
-    orca:register(Key, self(), maps:merge(
+    orka:register(Key, self(), maps:merge(
         #{tags => [group_member],
           properties => #{group => GroupName}},
         Metadata
@@ -78,22 +78,22 @@ join(GroupName, Metadata) ->
 %% Leave a group
 leave(GroupName, _Metadata) ->
     Key = {global, group, {GroupName, self()}},
-    orca:unregister(Key).
+    orka:unregister(Key).
 
 %% Get all members of a group
 members(GroupName) ->
-    Entries = orca:find_by_property(group, GroupName),
+    Entries = orka:find_by_property(group, GroupName),
     [Pid || {_Key, Pid, _Meta} <- Entries].
 
 %% Get members with specific role
 members_with_role(GroupName, Role) ->
-    AllMembers = orca:find_by_property(group, GroupName),
+    AllMembers = orka:find_by_property(group, GroupName),
     [Pid || {_Key, Pid, Meta} <- AllMembers,
             maps:get(role, Meta, undefined) =:= Role].
 
 %% Get statistics on group
 group_stats(GroupName) ->
-    Entries = orca:find_by_property(group, GroupName),
+    Entries = orka:find_by_property(group, GroupName),
     #{
         size => length(Entries),
         members => [Pid || {_Key, Pid, _Meta} <- Entries],
@@ -153,7 +153,7 @@ Stats = process_group:group_stats(workers),
 
 %% Create a group (with optional metadata)
 create_group(GroupName, GroupMetadata) ->
-    orca:register(
+    orka:register(
         {global, group_registry, GroupName},
         self(),
         maps:merge(
@@ -164,16 +164,16 @@ create_group(GroupName, GroupMetadata) ->
 
 %% Delete a group (and all members)
 delete_group(GroupName) ->
-    orca:unregister({global, group_registry, GroupName}),
-    Entries = orca:entries_by_tag(GroupName),
+    orka:unregister({global, group_registry, GroupName}),
+    Entries = orka:entries_by_tag(GroupName),
     lists:foreach(fun({Key, _Pid, _Meta}) ->
-        orca:unregister(Key)
+        orka:unregister(Key)
     end, Entries).
 
 %% Join a group
 join(GroupName, MemberKey, MemberMetadata) ->
     Key = {global, group_member, {GroupName, MemberKey}},
-    orca:register(Key, self(), maps:merge(
+    orka:register(Key, self(), maps:merge(
         #{tags => [GroupName, group_member],
           properties => #{group => GroupName}},
         MemberMetadata
@@ -182,11 +182,11 @@ join(GroupName, MemberKey, MemberMetadata) ->
 %% Leave a group
 leave(GroupName, MemberKey) ->
     Key = {global, group_member, {GroupName, MemberKey}},
-    orca:unregister(Key).
+    orka:unregister(Key).
 
 %% Get all members of group
 members(GroupName) ->
-    Entries = orca:entries_by_tag(GroupName),
+    Entries = orka:entries_by_tag(GroupName),
     [Pid || {_Key, Pid, _Meta} <- Entries, is_pid(Pid)].
 
 %% Broadcast message to all members
@@ -198,7 +198,7 @@ broadcast(GroupName, Message) ->
 
 %% Get group information
 group_info(GroupName) ->
-    case orca:lookup({global, group_registry, GroupName}) of
+    case orka:lookup({global, group_registry, GroupName}) of
         {ok, {_Key, _Pid, Metadata}} ->
             Members = members(GroupName),
             #{
@@ -268,7 +268,7 @@ process_group:delete_group(workers).
 
 %% Create a chat room
 create_room(RoomId) ->
-    orca:register(
+    orka:register(
         {global, chatroom, RoomId},
         self(),
         #{
@@ -283,7 +283,7 @@ create_room(RoomId) ->
 %% Join a room with user info
 join_room(RoomId, UserId, UserName) ->
     Key = {global, chatroom_member, {RoomId, UserId}},
-    orca:register(Key, self(), #{
+    orka:register(Key, self(), #{
         tags => [RoomId, chat_member],
         properties => #{
             room_id => RoomId,
@@ -296,11 +296,11 @@ join_room(RoomId, UserId, UserName) ->
 %% Leave a room
 leave_room(RoomId, UserId) ->
     Key = {global, chatroom_member, {RoomId, UserId}},
-    orca:unregister(Key).
+    orka:unregister(Key).
 
 %% Send message to room (broadcast)
 send_message(RoomId, UserId, Message) ->
-    Entries = orca:entries_by_tag(RoomId),
+    Entries = orka:entries_by_tag(RoomId),
     Members = [Pid || {_Key, Pid, _Meta} <- Entries],
     lists:foreach(fun(Pid) ->
         Pid ! {chat_message, RoomId, UserId, Message}
@@ -308,7 +308,7 @@ send_message(RoomId, UserId, Message) ->
 
 %% Get room members with usernames
 room_members(RoomId) ->
-    Entries = orca:entries_by_tag(RoomId),
+    Entries = orka:entries_by_tag(RoomId),
     [{UserId, UserName, Pid} || {_Key, Pid, Meta} <- Entries,
                                 UserId <- [maps:get(user_id, Meta)],
                                 UserName <- [maps:get(user_name, Meta)]].
@@ -323,7 +323,7 @@ room_members(RoomId) ->
 %% Register a worker with its capabilities
 register_worker(WorkerId, Capabilities) ->
     Key = {global, worker, WorkerId},
-    orca:register(Key, self(), #{
+    orka:register(Key, self(), #{
         tags => [worker_pool, active],
         properties => maps:merge(
             #{worker_id => WorkerId},
@@ -333,13 +333,13 @@ register_worker(WorkerId, Capabilities) ->
 
 %% Get all workers with specific capability
 get_workers_by_role(Role) ->
-    Entries = orca:entries_by_tag(worker_pool),
+    Entries = orka:entries_by_tag(worker_pool),
     [Pid || {_Key, Pid, Meta} <- Entries,
             lists:member(Role, maps:get(capabilities, Meta, []))].
 
 %% Assign task to worker
 assign_task(WorkerId, Task) ->
-    case orca:lookup({global, worker, WorkerId}) of
+    case orka:lookup({global, worker, WorkerId}) of
         {ok, {_Key, WorkerPid, _Meta}} ->
             WorkerPid ! {task, Task},
             {ok, WorkerPid};
@@ -349,7 +349,7 @@ assign_task(WorkerId, Task) ->
 
 %% Get pool statistics
 worker_stats() ->
-    Entries = orca:entries_by_tag(worker_pool),
+    Entries = orka:entries_by_tag(worker_pool),
     #{
         total => length(Entries),
         by_role => compute_role_distribution(Entries),
@@ -366,25 +366,25 @@ compute_role_distribution(Entries) ->
     end, #{}, Entries).
 ```
 
-## Comparison: Orca vs Syn
+## Comparison: Orka vs Syn
 
-| Feature | Syn | Orca | Notes |
+| Feature | Syn | Orka | Notes |
 |---------|-----|------|-------|
-| Process registration | ✓ | ✓ | Orca via keys |
-| Group membership | ✓ | ✓ | Orca via tags/properties |
+| Process registration | ✓ | ✓ | Orka via keys |
+| Group membership | ✓ | ✓ | Orka via tags/properties |
 | Dynamic groups | ✓ | ✓ | Both support |
 | Distributed | ✓ | ✗ (planned) | Syn integrated with dist nodes |
 | Monitoring | ✓ | ✓ | Both auto-cleanup on crash |
-| Querying members | Limited | ✓✓ | Orca has rich query via properties |
-| Broadcast to group | Plugin | Manual | Can wrap in orca module |
-| Performance | Optimized | Good | Orca uses ETS, syn uses mnesia |
+| Querying members | Limited | ✓✓ | Orka has rich query via properties |
+| Broadcast to group | Plugin | Manual | Can wrap in orka module |
+| Performance | Optimized | Good | Orka uses ETS, syn uses mnesia |
 
-## When to Use Process Groups with Orca
+## When to Use Process Groups with Orka
 
-**Use Orca Process Groups when**:
+**Use Orka Process Groups when**:
 - ✓ You need local groups (same node/app)
 - ✓ You want rich member metadata and filtering
-- ✓ You're already using orca for process registry
+- ✓ You're already using orka for process registry
 - ✓ You need flexible querying (by role, region, status, etc.)
 - ✓ You're building a trading app, chat system, or worker pool
 
@@ -394,12 +394,12 @@ compute_role_distribution(Entries) ->
 - ✓ You need dynamic group discovery across cluster
 - ✓ You're building a full distributed Erlang system
 
-## Hybrid Approach: Orca + Syn
+## Hybrid Approach: Orka + Syn
 
 For a distributed system, use both:
 
 ```erlang
-%% Local groups managed by orca (single node, fast)
+%% Local groups managed by orka (single node, fast)
 local_group:join(my_group, self()).
 
 %% Distributed groups managed by syn (cluster-wide)
@@ -408,24 +408,24 @@ syn:join({global, my_group}, self()).
 %% Best of both worlds - local performance + distributed discovery!
 ```
 
-## Future: `orca_grp` Module
+## Future: `orka_grp` Module
 
-As mentioned in the architecture plan, this implementation pattern could eventually be extracted into a dedicated `orca_grp` module:
+As mentioned in the architecture plan, this implementation pattern could eventually be extracted into a dedicated `orka_grp` module:
 
 ```erlang
-%% Eventually: orca_grp module
--module(orca_grp).
+%% Eventually: orka_grp module
+-module(orka_grp).
 -export([create/1, join/2, leave/2, members/1, broadcast/2]).
 
 %% Implementation would be the hybrid pattern (Pattern 3)
 %% But abstracted away from users
 ```
 
-This keeps `orca.erl` focused on core registry operations while providing **higher-level group abstractions** in extension modules.
+This keeps `orka.erl` focused on core registry operations while providing **higher-level group abstractions** in extension modules.
 
 ## Summary
 
-Orca's tag and property system makes it an excellent **local process group manager**. The three patterns shown provide increasing levels of sophistication:
+Orka's tag and property system makes it an excellent **local process group manager**. The three patterns shown provide increasing levels of sophistication:
 
 1. **Tags only** - Simple, fast, for basic groups
 2. **Tags + Properties** - Rich metadata, flexible querying

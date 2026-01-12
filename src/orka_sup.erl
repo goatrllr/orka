@@ -1,4 +1,4 @@
--module(orca_sup).
+-module(orka_sup).
 -behaviour(supervisor).
 
 -export([start_link/0]).
@@ -10,12 +10,12 @@ start_link() ->
 init([]) ->
 	Procs = [
 		#{
-			id => orca,
-			start => {orca, start_link, []},
+			id => orka,
+			start => {orka, start_link, []},
 			restart => permanent,
 			shutdown => 5000,
 			type => worker,
-			modules => [orca]
+			modules => [orka]
 		}
 	],
 	{ok, {{one_for_one, 1, 5}, Procs}}.
