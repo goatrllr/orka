@@ -118,7 +118,7 @@ Including:
 
 All examples and patterns have been tested:
 
-- **68/68 tests passing** in Common Test suite
+- **71/71 tests passing** in Common Test suite
 - Coverage includes: registration, lookups, tags, properties, singleton, await, subscribe, batch operations
 
 See `test/orca_SUITE.erl` for test implementations.

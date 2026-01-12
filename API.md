@@ -2,7 +2,7 @@
 
 Orca is a production-ready **ETS-based process registry** for Erlang/OTP applications. It provides fast, lock-free lookups with features for registration, metadata management, tags, properties, and startup coordination.
 
-**Status**: ✅ Fully tested (68/68 tests passing) | **Latest**: Batch registration support | **License**: MIT
+**Status**: ✅ Fully tested (71/71 tests passing) | **Latest**: Batch registration support | **License**: MIT
 
 ---
 

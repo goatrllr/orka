@@ -1,6 +1,6 @@
 # Orca: Fast Process Registry for Erlang
 
-![Tests](https://img.shields.io/badge/tests-68%2F68%20passing-brightgreen) ![Status](https://img.shields.io/badge/status-production%20ready-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+![Tests](https://img.shields.io/badge/tests-71%2F71%20passing-brightgreen) ![Status](https://img.shields.io/badge/status-production%20ready-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
 Orca is a **high-performance, ETS-based process registry** for Erlang/OTP applications. It provides fast lock-free lookups, automatic process lifecycle management, rich metadata querying, and startup coordination features.
 
@@ -13,7 +13,7 @@ Orca is a **high-performance, ETS-based process registry** for Erlang/OTP applic
 ✅ **Batch operations** — Atomic multi-process registration  
 ✅ **Singleton pattern** — One-key-per-process constraint  
 ✅ **Zero dependencies** — Pure Erlang/OTP, no external deps  
-✅ **Fully tested** — 68 test cases, all passing  
+✅ **Fully tested** — 71 test cases, all passing  
 
 ## Use Cases
 
@@ -109,7 +109,7 @@ Start with **[API.md](API.md)** for complete documentation, then explore:
 All features are thoroughly tested:
 
 ```bash
-make ct        # Run Common Test suite (68/68 passing)
+make ct        # Run Common Test suite (71/71 passing)
 make clean     # Clean build artifacts
 make erl       # Start Erlang shell with orca loaded
 ```
@@ -264,7 +264,7 @@ orca/
 │   ├── orca.erl              # Main registry module
 │   └── orca_app.erl          # Application callback
 ├── test/
-│   ├── orca_SUITE.erl        # Test suite (68 tests)
+│   ├── orca_SUITE.erl        # Test suite (71 tests across 7 suites)
 │   └── orca_app_SUITE.erl    # App lifecycle tests
 ├── ebin/                      # Compiled BEAM files
 ├── API.md                     # Main API documentation
@@ -405,7 +405,7 @@ Contributions welcome! Please:
 1. Add tests for new features
 2. Update documentation
 3. Follow existing code style
-4. Ensure all 68 tests pass
+4. Ensure all 71 tests pass
 
 ## License
 
@@ -425,4 +425,4 @@ MIT - See LICENSE file
 
 ---
 
-**Latest Version**: 1.0 | **Status**: Production Ready ✅ | **Tests**: 68/68 passing | **Code**: 650 lines (1,481 total with docs) | **Erlang**: OTP 24+ | **License**: MIT
+**Latest Version**: 1.0 | **Status**: Production Ready ✅ | **Tests**: 71/71 passing | **Code**: 650 lines (1,481 total with docs) | **Erlang**: OTP 24+ | **License**: MIT

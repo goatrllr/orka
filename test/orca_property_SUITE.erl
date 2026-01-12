@@ -101,11 +101,11 @@ tag_gen() ->
 	elements([online, offline, critical, service, user, resource, beta, alpha]).
 
 properties_gen() ->
-	?LET(Names, list(prop_name_gen()),
-		maps:from_list([{N, prop_value_gen()} || N <- lists:usort(Names)])).
+	?LET(Names, list(name_gen()),
+		maps:from_list([{N, value_gen()} || N <- lists:usort(Names)])).
 
-prop_name_gen() ->
+name_gen() ->
 	elements([region, status, version, capacity, tier]).
 
-prop_value_gen() ->
+value_gen() ->
 	oneof([integer(), atom(), binary()]).
