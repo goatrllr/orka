@@ -1,5 +1,11 @@
 # Orca Documentation
 
+<div align="center">
+
+![Orca Logo](images/orca_logo.png)
+
+</div>
+
 Complete documentation for the Orca ETS-based process registry.
 
 ## Main Documentation

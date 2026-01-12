@@ -1,6 +1,12 @@
 # Orca: Fast Process Registry for Erlang
 
+<div align="center">
+
+![Orca Logo](docs/images/orca_logo.png)
+
 ![Tests](https://img.shields.io/badge/tests-71%2F71%20passing-brightgreen) ![Status](https://img.shields.io/badge/status-production%20ready-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+
+</div>
 
 Orca is a **high-performance, ETS-based process registry** for Erlang/OTP applications. It provides fast lock-free lookups, automatic process lifecycle management, rich metadata querying, and startup coordination features.
 
