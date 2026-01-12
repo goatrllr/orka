@@ -45,6 +45,7 @@
 	test_register_single_same_key_returns_existing/1,
 	test_register_single_badarg/1,
 	test_await_already_registered/1,
+	test_await_timeout_zero_no_dangling_subscriber/1,
 	test_await_timeout/1,
 	test_await_registration/1,
 	test_subscribe_already_registered/1,
@@ -109,6 +110,7 @@ all() ->
 		test_register_single_same_key_returns_existing,
 		test_register_single_badarg,
 		test_await_already_registered,
+		test_await_timeout_zero_no_dangling_subscriber,
 		test_await_timeout,
 		test_await_registration,
 		test_subscribe_already_registered,
@@ -785,6 +787,45 @@ test_await_already_registered(Config) ->
 	true = Elapsed < 500,
 	
 	ct:log("✓ await/2 returns immediately when key already registered"),
+	Config.
+
+%% @doc Test await/2 with Timeout=0 does not leave dangling subscription
+test_await_timeout_zero_no_dangling_subscriber(Config) ->
+	Key = {global, service, await_zero},
+	Parent = self(),
+	Pid = spawn(fun() -> timer:sleep(10000) end),
+
+	Awaiter = spawn(fun() ->
+		Result = orca:await(Key, 0),
+		Parent ! {await_result, Result},
+		receive
+			{orca_registered, Key, _Entry} ->
+				Parent ! {unexpected_registered, Key}
+		after 200 ->
+			Parent ! {no_unexpected_registration, Key}
+		end
+	end),
+
+	receive
+		{await_result, {error, timeout}} -> ok
+	after 1000 ->
+		ct:fail(timeout_waiting_for_await_result)
+	end,
+
+	{ok, _} = orca:register(Key, Pid, #{}),
+
+	receive
+		{unexpected_registered, Key} ->
+			ct:fail(dangling_subscriber_received_registration);
+		{no_unexpected_registration, Key} ->
+			ok
+	after 1000 ->
+		ct:fail(timeout_waiting_for_registration_check)
+	end,
+
+	_ = erlang:exit(Awaiter, kill),
+	ok = orca:unregister(Key),
+	ct:log("✓ await/2 with Timeout=0 does not leave subscribers behind"),
 	Config.
 
 %% @doc Test await timeout when key is never registered

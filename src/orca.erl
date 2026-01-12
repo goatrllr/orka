@@ -345,23 +345,31 @@ unregister_batch(_Keys) ->
 %%             {stop, database_timeout}
 %%     end.
 await(Key, Timeout) ->
+	case Timeout of
+		0 ->
+			case ets:lookup(?REGISTRY_TABLE, Key) of
+				[Entry] -> {ok, Entry};
+				[] -> {error, timeout}
+			end;
+		_ ->
 	%% Subscribe to the key
-	gen_server:call(?MODULE, {subscribe_await, Key, self(), Timeout}),
-	%% Wait for notification (either {orca_registered, Key, Entry} or timeout)
-	receive
-		{orca_registered, Key, Entry} -> {ok, Entry};
-		{orca_await_timeout, Key} -> 
-			gen_server:call(?MODULE, {unsubscribe, Key, self()}),	
-			{error, timeout}
-	after Timeout ->
-			%% Timeout occurred, unsubscribe and return error
-			gen_server:call(?MODULE, {unsubscribe, Key, self()}),
-			%% Drain any pending timeout message from the subscription timer.
-			receive
-				{orca_await_timeout, Key} -> ok
-			after 0 -> ok
-			end,
-			{error, timeout}
+		gen_server:call(?MODULE, {subscribe_await, Key, self(), Timeout}),
+		%% Wait for notification (either {orca_registered, Key, Entry} or timeout)
+		receive
+			{orca_registered, Key, Entry} -> {ok, Entry};
+			{orca_await_timeout, Key} -> 
+				gen_server:call(?MODULE, {unsubscribe, Key, self()}),	
+				{error, timeout}
+		after Timeout ->
+				%% Timeout occurred, unsubscribe and return error
+				gen_server:call(?MODULE, {unsubscribe, Key, self()}),
+				%% Drain any pending timeout message from the subscription timer.
+				receive
+					{orca_await_timeout, Key} -> ok
+				after 0 -> ok
+				end,
+				{error, timeout}
+		end
 	end.
 
 %% @doc Subscribe to notifications when a key is registered.
@@ -410,11 +418,25 @@ unsubscribe(Key) ->
 	gen_server:call(?MODULE, {unsubscribe, Key, self()}).
 
 %% @doc Lookup a single entry by key. Returns {ok, {Key, Pid, Metadata}} or not_found.
+-spec lookup(Key) -> {ok, {Key, pid(), map()}} | not_found.
 lookup(Key) ->
 	case ets:lookup(?REGISTRY_TABLE, Key) of
-		[Entry] -> {ok, Entry};
-		[] -> not_found
+		[{_Key, Pid, _} = Entry] ->
+			case is_process_alive(Pid) of
+				true ->
+					{ok, Entry};
+				false ->
+					%% Best-effort cleanup without risking a self-call deadlock
+					case whereis(?MODULE) =:= self() of
+						true -> ok;
+						false -> gen_server:cast(?MODULE, {cleanup_dead, Key, Pid})
+					end,
+					not_found
+			end;
+		[] ->
+			not_found
 	end.
+
 
 %% @doc Return all entries in the registry.
 lookup_all() ->
@@ -674,7 +696,7 @@ count_by_type(Type) ->
 
 count_by_tag(Tag) ->
 	%% Count entries with this tag using the index
-	length(ets:match_object(?TAG_INDEX_TABLE, {{tag, Tag}, '_'})).
+	ets:select_count(?TAG_INDEX_TABLE, [{{{tag, Tag}, '_'}, [], [true]}]).
 
 %% @doc Register a property value for a process.
 %% Properties are arbitrary values associated with registered processes.
@@ -785,7 +807,7 @@ find_by_property(Type, PropertyName, PropertyValue) ->
 %% orca:count_by_property(capacity, 100).
 %% Result: 2
 count_by_property(PropertyName, PropertyValue) ->
-	length(ets:match_object(?PROPERTY_INDEX_TABLE, {{property, PropertyName, PropertyValue}, '_'})).
+	ets:select_count(?PROPERTY_INDEX_TABLE, [{{{property, PropertyName, PropertyValue}, '_'}, [], [true]}]).
 
 %% @doc Get statistics about a property across all processes.
 %% Returns a map with counts for each unique value of the property.
@@ -1131,6 +1153,16 @@ handle_info(_Info, State) ->
 handle_cast(Msg, {PidSingleton, PidKeyMap, Subscribers}) ->
 	%% Upgrade legacy state without MonitorMap
 	handle_cast(Msg, {PidSingleton, PidKeyMap, Subscribers, maps:new()});
+handle_cast({cleanup_dead, Key, Pid}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
+	case ets:lookup(?REGISTRY_TABLE, Key) of
+		[{Key, Pid, _}] ->
+			case do_unregister(Key, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) of
+				{ok, UpdatedState} -> {noreply, UpdatedState};
+				{not_found, UpdatedState} -> {noreply, UpdatedState}
+			end;
+		_ ->
+			{noreply, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
+	end;
 handle_cast(_Msg, State) ->
 	{noreply, State}.
 
