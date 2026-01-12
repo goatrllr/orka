@@ -8,7 +8,7 @@
 -export([register_batch_with/1]).
 -export([register_with/3]).
 -export([register_single/2, register_single/3]).
--export([unregister/1, batch_unregister/1]).
+-export([unregister/1, unregister_batch/1]).
 -export([await/2, subscribe/1, unsubscribe/1]).
 -export([lookup/1]).
 -export([lookup_all/0]).
@@ -310,9 +310,9 @@ unregister(Key) ->
 	gen_server:call(?MODULE, {unregister, Key}).
 
 %% @doc Unregister multiple keys in a single call (no batch restrictions).
-batch_unregister(Keys) when is_list(Keys) ->
-	gen_server:call(?MODULE, {batch_unregister, Keys});
-batch_unregister(_Keys) ->
+unregister_batch(Keys) when is_list(Keys) ->
+	gen_server:call(?MODULE, {unregister_batch, Keys});
+unregister_batch(_Keys) ->
 	{error, badarg}.
 
 %% @doc Block and wait for a key to be registered with a timeout.
@@ -905,7 +905,7 @@ handle_call({unregister, Key}, _From, {PidSingleton, PidKeyMap, Subscribers, Mon
 	end;
 
 %% @doc Handle batch unregistration requests
-handle_call({batch_unregister, Keys}, _From, State) ->
+handle_call({unregister_batch, Keys}, _From, State) ->
 	{FinalState, RemovedKeys, NotFoundKeys} = lists:foldl(fun(Key, {AccState, RemovedAcc, NotFoundAcc}) ->
 		case do_unregister(Key, AccState) of
 			{ok, UpdatedState} ->

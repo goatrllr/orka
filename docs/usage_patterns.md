@@ -600,7 +600,7 @@ init([UserId]) ->
 
 **Cleanup**:
 
-When unregistering all services for a user/context, use `batch_unregister/1`:
+When unregistering all services for a user/context, use `unregister_batch/1`:
 
 ```erlang
 %% Clean up all services for a user when workspace closes
@@ -612,7 +612,7 @@ Keys = [
     {global, orders, UserId},
     {global, risk, UserId}
 ],
-{ok, {RemovedKeys, NotFoundKeys}} = orca:batch_unregister(Keys).
+{ok, {RemovedKeys, NotFoundKeys}} = orca:unregister_batch(Keys).
 
 %% RemovedKeys = [all keys that were removed]
 %% NotFoundKeys = [any keys that weren't registered]

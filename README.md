@@ -211,11 +211,11 @@ See **[docs/comparison.md](docs/comparison.md)** for detailed comparison.
 
 ### Core Functions
 - `register/2,3` — Register a process
-- `register_batch_with/1` — Start and register processes atomically
+- `register_with/3` — Atomically start and register
+- `register_single/2,3` — Singleton constraint
 - `lookup/1` — Fast key lookup
 - `lookup_all/0` — Get all entries
 - `unregister/1` — Remove entry
-- `batch_unregister/1` — Remove multiple entries atomically
 
 ### Querying
 - `entries_by_type/1` — Find by key type
@@ -225,11 +225,11 @@ See **[docs/comparison.md](docs/comparison.md)** for detailed comparison.
 - `property_stats/2` — Distribution analysis
 
 ### Advanced
-- `register_with/3` — Atomic startup + registration
-- `register_single/2,3` — Singleton constraint
 - `register_batch/1` — Batch atomic registration
 - `register_batch_with/1` — Start and batch register atomically
-- `batch_unregister/1` — Remove multiple entries atomically
+- `unregister_batch/1` — Remove multiple entries atomically
+- `register_property/3` — Add queryable properties
+- `update_metadata/2` — Update metadata on entry
 - `await/2` — Block on startup
 - `subscribe/1` — Non-blocking notification
 - `add_tag/2`, `remove_tag/2` — Dynamic metadata
@@ -267,24 +267,35 @@ orca/
 │   ├── orca.erl              # Main registry module
 │   └── orca_app.erl          # Application callback
 ├── test/
-│   ├── orca_SUITE.erl        # Test suite (71 tests across 7 suites)
-│   └── orca_app_SUITE.erl    # App lifecycle tests
+│   ├── orca_SUITE.erl                  # Core registry tests (main test suite)
+│   ├── orca_app_SUITE.erl              # Application lifecycle tests
+│   ├── orca_concurrency_SUITE.erl      # Concurrent operations tests
+│   ├── orca_extra_SUITE.erl            # Extended feature tests
+│   ├── orca_property_SUITE.erl         # Property-based tests
+│   ├── orca_gpt_regression_SUITE.erl   # GPT-identified issue regressions
+│   └── orca_issue_regression_SUITE.erl # Known issue regressions
 ├── ebin/                      # Compiled BEAM files
-├── API.md                     # Main API documentation
+│
+├── API.md                     # API reference (complete documentation)
 ├── README.md                  # This file
+├── DOCMAP.md                  # Documentation navigation guide
 ├── rebar.config               # Build configuration
 ├── Makefile                   # Build targets
+│
 └── docs/
     ├── README.md              # Documentation guide
-    ├── usage_patterns.md      # 8 patterns
+    ├── usage_patterns.md      # 8 fundamental patterns
     ├── singleton_examples.md  # Single-instance services
-    ├── property_examples.md   # Rich querying
+    ├── property_examples.md   # Rich metadata querying
     ├── await_examples.md      # Startup coordination
     ├── comparison.md          # vs gproc/syn
-    └── extensions/            # Future ideas
-        ├── orca_syn.md        # Multi-node pattern
-        ├── groups_examples.md # Process groups
-        └── partial_match_options.md  # Query patterns
+    │
+    └── extensions/            # Extension ideas (not yet implemented)
+        ├── README.md          # Extension overview
+        ├── orca_syn.md        # Orca + Syn hybrid architecture
+        ├── groups_examples.md # Process groups patterns
+        ├── partial_match_options.md  # Query patterns
+        └── message_systems.md # Kafka/RabbitMQ clone architectures
 ```
 
 ## Common Tasks

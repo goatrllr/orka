@@ -329,7 +329,7 @@ not_found = orca:unregister({global, service, nonexistent}).
 
 ---
 
-#### `batch_unregister(Keys) -> {ok, {RemovedKeys, NotFoundKeys}} | {error, badarg}`
+#### `unregister_batch(Keys) -> {ok, {RemovedKeys, NotFoundKeys}} | {error, badarg}`
 
 Remove multiple entries in a single call. All keys are processed independently; success/failure of one key doesn't affect others.
 
@@ -341,7 +341,7 @@ Keys = [
     {global, service, cache_1},
     {global, service, missing_1}  %% This key doesn't exist
 ],
-{ok, {RemovedKeys, NotFoundKeys}} = orca:batch_unregister(Keys).
+{ok, {RemovedKeys, NotFoundKeys}} = orca:unregister_batch(Keys).
 
 %% RemovedKeys = [{global, service, translator_1}, {global, service, cache_1}]
 %% NotFoundKeys = [{global, service, missing_1}]
@@ -367,7 +367,7 @@ Keys = [
 
 **Comparison with individual unregister**:
 - `unregister/1`: Single key, returns `ok | not_found`
-- `batch_unregister/1`: Multiple keys, returns detailed breakdown of removed vs not found
+- `unregister_batch/1`: Multiple keys, returns detailed breakdown of removed vs not found
 
 ---
 
