@@ -1,6 +1,6 @@
 # Orca: Fast Process Registry for Erlang
 
-![Tests](https://img.shields.io/badge/tests-35%2F35%20passing-brightgreen) ![Status](https://img.shields.io/badge/status-production%20ready-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+![Tests](https://img.shields.io/badge/tests-68%2F68%20passing-brightgreen) ![Status](https://img.shields.io/badge/status-production%20ready-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
 Orca is a **high-performance, ETS-based process registry** for Erlang/OTP applications. It provides fast lock-free lookups, automatic process lifecycle management, rich metadata querying, and startup coordination features.
 
@@ -13,7 +13,7 @@ Orca is a **high-performance, ETS-based process registry** for Erlang/OTP applic
 ✅ **Batch operations** — Atomic multi-process registration  
 ✅ **Singleton pattern** — One-key-per-process constraint  
 ✅ **Zero dependencies** — Pure Erlang/OTP, no external deps  
-✅ **Fully tested** — 35 test cases, all passing  
+✅ **Fully tested** — 68 test cases, all passing  
 
 ## Use Cases
 
@@ -46,10 +46,10 @@ HighCapacity = orca:find_by_property(capacity, 100).
 %% Await service startup
 {ok, Entry} = orca:await({global, service, database}, 30000).
 
-%% Batch register (atomic)
+%% Batch register (atomic, explicit Pids)
 {ok, Entries} = orca:register_batch([
-    {{global, portfolio, user1}, #{tags => [portfolio, user1]}},
-    {{global, orders, user1}, #{tags => [orders, user1]}}
+    {{global, portfolio, user1}, Pid1, #{tags => [portfolio, user1]}},
+    {{global, orders, user1}, Pid2, #{tags => [orders, user1]}}
 ]).
 ```
 
@@ -82,9 +82,9 @@ Start with **[API.md](API.md)** for complete documentation, then explore:
 │ ETS Public  │  │ State Maps   │
 │ Tables      │  │ {PidSingleton│
 │             │  │  PidKeyMap   │
-│ • registry  │  │  Subscribers}│
-│ • tag_idx   │  └──────────────┘
-│ • prop_idx  │
+│ • registry  │  │  Subscribers │
+│ • tag_idx   │  │  MonitorMap} │
+│ • prop_idx  │  └──────────────┘
 └─────────────┘
 ```
 
@@ -109,7 +109,7 @@ Start with **[API.md](API.md)** for complete documentation, then explore:
 All features are thoroughly tested:
 
 ```bash
-make ct        # Run Common Test suite (35/35 passing)
+make ct        # Run Common Test suite (68/68 passing)
 make clean     # Clean build artifacts
 make erl       # Start Erlang shell with orca loaded
 ```
@@ -167,9 +167,9 @@ init([]) ->
 ### Batch Registration
 ```erlang
 {ok, Entries} = orca:register_batch([
-    {{global, portfolio, user1}, #{tags => [user1, portfolio]}},
-    {{global, orders, user1}, #{tags => [user1, orders]}},
-    {{global, risk, user1}, #{tags => [user1, risk]}}
+    {{global, portfolio, user1}, Pid1, #{tags => [user1, portfolio]}},
+    {{global, orders, user1}, Pid2, #{tags => [user1, orders]}},
+    {{global, risk, user1}, Pid3, #{tags => [user1, risk]}}
 ]).
 ```
 
@@ -211,6 +211,7 @@ See **[docs/comparison.md](docs/comparison.md)** for detailed comparison.
 
 ### Core Functions
 - `register/2,3` — Register a process
+- `register_batch_with/1` — Start and register processes atomically
 - `lookup/1` — Fast key lookup
 - `lookup_all/0` — Get all entries
 - `unregister/1` — Remove entry
@@ -263,7 +264,7 @@ orca/
 │   ├── orca.erl              # Main registry module
 │   └── orca_app.erl          # Application callback
 ├── test/
-│   ├── orca_SUITE.erl        # Test suite (35 tests)
+│   ├── orca_SUITE.erl        # Test suite (68 tests)
 │   └── orca_app_SUITE.erl    # App lifecycle tests
 ├── ebin/                      # Compiled BEAM files
 ├── API.md                     # Main API documentation
@@ -327,11 +328,11 @@ See [API.md FAQ](API.md#faqs) for more.
 %% Register user workspace with 5 services
 create_user_workspace(UserId) ->
     {ok, Entries} = orca:register_batch([
-        {{global, portfolio, UserId}, #{tags => [UserId, portfolio]}},
-        {{global, technical, UserId}, #{tags => [UserId, technical]}},
-        {{global, orders, UserId}, #{tags => [UserId, orders]}},
-        {{global, risk, UserId}, #{tags => [UserId, risk]}},
-        {{global, monitoring, UserId}, #{tags => [UserId, monitoring]}}
+        {{global, portfolio, UserId}, Pid1, #{tags => [UserId, portfolio]}},
+        {{global, technical, UserId}, Pid2, #{tags => [UserId, technical]}},
+        {{global, orders, UserId}, Pid3, #{tags => [UserId, orders]}},
+        {{global, risk, UserId}, Pid4, #{tags => [UserId, risk]}},
+        {{global, monitoring, UserId}, Pid5, #{tags => [UserId, monitoring]}}
     ]),
     {ok, Entries}.
 
@@ -404,7 +405,7 @@ Contributions welcome! Please:
 1. Add tests for new features
 2. Update documentation
 3. Follow existing code style
-4. Ensure all 35 tests pass
+4. Ensure all 68 tests pass
 
 ## License
 
@@ -414,7 +415,7 @@ MIT - See LICENSE file
 
 - Inspired by gproc and syn process registries
 - ETS-based architecture for performance
-- Common Test for comprehensive testing
+- Common Test, PropEr for comprehensive testing
 
 ## Support
 
@@ -424,4 +425,4 @@ MIT - See LICENSE file
 
 ---
 
-**Latest Version**: 1.0 | **Status**: Production Ready ✅ | **Tests**: 35/35 passing | **Erlang**: OTP 24+ | **License**: MIT
+**Latest Version**: 1.0 | **Status**: Production Ready ✅ | **Tests**: 68/68 passing | **Code**: 650 lines (1,481 total with docs) | **Erlang**: OTP 24+ | **License**: MIT

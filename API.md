@@ -2,7 +2,7 @@
 
 Orca is a production-ready **ETS-based process registry** for Erlang/OTP applications. It provides fast, lock-free lookups with features for registration, metadata management, tags, properties, and startup coordination.
 
-**Status**: ✅ Fully tested (35/35 tests passing) | **Latest**: Batch registration support | **License**: MIT
+**Status**: ✅ Fully tested (68/68 tests passing) | **Latest**: Batch registration support | **License**: MIT
 
 ---
 
@@ -106,7 +106,7 @@ Register a specific process (useful in supervisors).
 - If key already registered with live process: returns existing entry
 - If key registered but process dead: cleans up and re-registers
 
-#### `register_with(Key, Metadata, {M, F, A}) -> {ok, Pid} | {ok, Entry} | error`
+#### `register_with(Key, Metadata, {M, F, A}) -> {ok, Pid} | error`
 
 Atomically start a process and register it. Ensures no race conditions between startup and registration.
 
@@ -118,8 +118,9 @@ Atomically start a process and register it. Ensures no race conditions between s
     {translator_server, start_link, []}
 ).
 
-%% If the key is already registered, returns the existing entry
+%% If the key is already registered with a live process, returns {ok, Pid} from the started process
 %% If registration fails, process is automatically terminated
+%% If the MFA returns a Pid directly (not {ok, Pid}), that is also accepted
 ```
 
 **Benefits**:
@@ -127,33 +128,61 @@ Atomically start a process and register it. Ensures no race conditions between s
 - Automatic cleanup if registration fails
 - Ideal for dynamic supervisor specifications
 
-#### `register_batch(Registrations) -> {ok, [Entry]} | error`
+#### `register_batch(Registrations) -> {ok, [Entry]} | {error, {Reason, FailedKeys, SuccessfulEntries}}`
 
-Register multiple processes in a single atomic call. All succeed or all fail.
+Register multiple processes in a single atomic call. All succeed or all fail and are rolled back.
 
 ```erlang
-%% Register 5 trading services for a user
+%% Register 5 trading services for a user (explicit Pids)
 UserId = user123,
 {ok, Entries} = orca:register_batch([
-    {{global, portfolio, UserId}, #{tags => [portfolio, user]}},
-    {{global, technical, UserId}, #{tags => [technical, user]}},
-    {{global, orders, UserId}, #{tags => [orders, user]}},
-    {{global, risk, UserId}, #{tags => [risk, user]}},
-    {{global, monitoring, UserId}, #{tags => [monitoring, user]}}
+    {{global, portfolio, UserId}, Pid1, #{tags => [portfolio, user]}},
+    {{global, technical, UserId}, Pid2, #{tags => [technical, user]}},
+    {{global, orders, UserId}, Pid3, #{tags => [orders, user]}},
+    {{global, risk, UserId}, Pid4, #{tags => [risk, user]}},
+    {{global, monitoring, UserId}, Pid5, #{tags => [monitoring, user]}}
 ]).
 
-%% Or with explicit Pids
-{ok, Entries} = orca:register_batch([
-    {{global, worker, job1}, Pid1, #{tags => [worker]}},
-    {{global, worker, job2}, Pid2, #{tags => [worker]}},
-    {{global, worker, job3}, Pid3, #{tags => [worker]}}
-]).
+%% On error, returns tuple with reason, list of failed keys, and list of entries that succeeded (before rollback)
+{error, {Reason, FailedKeys, SuccessfulEntries}} = orca:register_batch([...]).
 ```
+
+**Behavior**:
+- If a key is **already registered with a live process**, the existing entry is returned in the results and batch continues (similar to `register/3`)
+- If a key's process is **dead**, the entry is cleaned up and the new Pid is registered
+- On any registration failure, all **newly registered entries from this batch** are rolled back
+- Dead processes are automatically cleaned up via monitors
+
+**Rollback behavior**: If any new registration fails, all previously registered entries from this batch are immediately removed from the registry. Entries that were already registered before the call remain in the registry.
 
 **Use cases**:
 - Multi-process per-user workloads (trading app: 5 services per user)
 - Batch worker registration
 - Atomic multi-service startup
+
+#### `register_batch_with(Registrations) -> {ok, [Entry]} | {error, {Reason, FailedKeys, SuccessfulEntries}}`
+
+Start multiple processes via `{Module, Function, Arguments}` and register them atomically.
+
+```erlang
+%% Start and register 3 workers in a single atomic call
+{ok, Entries} = orca:register_batch_with([
+    {{global, worker, job1}, #{tags => [worker]}, {worker_sup, start_job, [job1]}},
+    {{global, worker, job2}, #{tags => [worker]}, {worker_sup, start_job, [job2]}},
+    {{global, worker, job3}, #{tags => [worker]}, {worker_sup, start_job, [job3]}}
+]).
+
+%% On error, returns tuple with reason, list of failed keys, and list of entries that succeeded (before rollback)
+{error, {Reason, FailedKeys, SuccessfulEntries}} = orca:register_batch_with([...]).
+```
+
+**Behavior**:
+- If a key is **already registered with a live process**, the existing entry is returned and batch continues (MFA not executed)
+- If a key's process is **dead**, the entry is cleaned up, MFA is executed, and new Pid is registered
+- On any failure (MFA error, registration error, invalid return), all **newly started and registered processes from this batch** are rolled back and terminated
+- Only processes started in this batch are terminated on rollback; previously registered processes remain
+
+**Rollback behavior**: If any MFA fails or returns invalid value, all previously registered entries from this batch are removed and all processes started by this batch are terminated. Entries that were already registered before the call remain unaffected.
 
 #### `register_single(Key, Metadata) -> {ok, Entry} | error`
 #### `register_single(Key, Pid, Metadata) -> {ok, Entry} | error`
@@ -175,11 +204,11 @@ Register with singleton constraint: **one key per Pid**. A process can only be r
         Metadata
     ).
 
-%% Re-registering under same key returns the existing entry (metadata unchanged)
+%% Re-registering under same key returns the existing entry
 {ok, Entry} = orca:register_single(
     {global, service, config_server},
     ConfigPid,
-    Metadata
+    UpdatedMetadata
 ).
 ```
 
@@ -270,6 +299,14 @@ Count entries with a specific tag.
 OnlineCount = orca:count_by_tag(online),
 CriticalCount = orca:count_by_tag(critical).
 ```
+
+### Tag Normalization
+
+**Behavior**: Tags in metadata are automatically normalized (deduplicated and sorted) when registered via `register/2,3`, `register_with/3`, or `register_batch/1`. For example, `tags => [online, critical, online]` becomes `tags => [critical, online]`. This ensures consistent tag ordering and eliminates duplicates without explicit user action.
+
+### Process Cleanup
+
+**Automatic cleanup**: When a registered process crashes, its entry is automatically removed from the registry. This is achieved via process monitors that trigger cleanup when a process exits. All associated tags and properties are also removed automatically. No explicit demonitor or cleanup code is needed.
 
 ---
 
@@ -452,23 +489,26 @@ orca:register_property({global, resource, db_2}, DbPid2,
 
 #### `find_by_property(PropertyName, PropertyValue) -> [{Key, Pid, Metadata}]`
 
-Find all entries with a specific property value.
+Find all entries with a specific property value. Matches use exact Erlang term equality (e.g., `"us-west"` matches only `"us-west"`, not `us_west`).
 
 ```erlang
 %% Find all services in us-west region
 WestServices = orca:find_by_property(region, "us-west"),
 
-%% Find all translators with capacity >= 150
+%% Find all translators with capacity of exactly 150
 HighCapacity = orca:find_by_property(capacity, 150).
 ```
 
 #### `find_by_property(Type, PropertyName, PropertyValue) -> [{Key, Pid, Metadata}]`
 
-Find entries by type AND property.
+Find entries with a specific property value, filtered by key type. The `Type` parameter matches the second element of the key tuple (e.g., `service`, `resource`). Property matching uses exact Erlang term equality.
 
 ```erlang
 %% Find all database resources in us-west (not services)
 WestDatabases = orca:find_by_property(resource, region, "us-west").
+
+%% Find all services (Type) with specific configuration (Property)
+ConfiguredServices = orca:find_by_property(service, config, #{timeout => 5000, retries => 3}).
 ```
 
 #### `count_by_property(PropertyName, PropertyValue) -> integer()`
@@ -482,24 +522,31 @@ io:format("~w services in us-west~n", [WestCount]).
 
 #### `property_stats(Type, PropertyName) -> #{Value => Count}`
 
-Get distribution statistics for a property, filtered by type.
+Get distribution statistics for a property across entries of a specific type. Aggregates counts by property value.
 
 ```erlang
-%% Get region distribution for all services
+%% Get region distribution for all services (counts per region)
 RegionStats = orca:property_stats(service, region),
 %% Result: #{"us-west" => 3, "us-east" => 2, "eu-central" => 1}
 
-%% Get capacity distribution for all resources
+%% Get capacity distribution for all resources (counts per capacity level)
 CapacityStats = orca:property_stats(resource, capacity),
 %% Result: #{100 => 2, 150 => 3, 200 => 1}
+
+%% Get distribution of configuration objects (aggregated by unique config value)
+ConfigStats = orca:property_stats(service, config),
+%% Result: #{#{timeout => 5000, retries => 3} => 2, #{timeout => 10000, retries => 5} => 1}
 ```
 
 **Use cases**:
-- Geographic load balancing by service type
+- Geographic load balancing by service type (how many services per region)
 - Health monitoring by region for specific types
 - Resource pool distribution analysis
 - Feature flag queries per type
 - Capacity planning
+- Monitoring property value distribution
+
+**Note**: Returns a map where keys are property values (any Erlang term) and values are counts of processes with that property value. For example, if 3 services have `region => "us-west"`, the result includes `#{"us-west" => 3}`.
 
 ---
 
@@ -580,19 +627,19 @@ Register 5 trading services per user atomically:
 %% In trading_app
 create_user_workspace(UserId) ->
     {ok, Entries} = orca:register_batch([
-        {{global, portfolio, UserId}, #{
+        {{global, portfolio, UserId}, Pid1, #{
             tags => [UserId, portfolio, trading]
         }},
-        {{global, technical, UserId}, #{
+        {{global, technical, UserId}, Pid2, #{
             tags => [UserId, technical, trading]
         }},
-        {{global, orders, UserId}, #{
+        {{global, orders, UserId}, Pid3, #{
             tags => [UserId, orders, trading]
         }},
-        {{global, risk, UserId}, #{
+        {{global, risk, UserId}, Pid4, #{
             tags => [UserId, risk, trading]
         }},
-        {{global, monitoring, UserId}, #{
+        {{global, monitoring, UserId}, Pid5, #{
             tags => [UserId, monitoring, trading]
         }}
     ]),
@@ -820,6 +867,28 @@ exit(Pid, kill),           %% Process crashes
 timer:sleep(100),          %% Wait for monitor notification
 not_found = orca:lookup(Key).  %% Entry removed automatically
 ```
+
+### Q: What happens when I batch register a key that's already registered?
+
+If a key is already registered with a **live process**, the existing entry is returned and the batch continues (similar to regular `register/3`):
+
+```erlang
+%% First batch
+{ok, [E1, E2, E3]} = orca:register_batch([
+    {{global, service, api}, Pid1, #{tags => [service]}},
+    {{global, service, cache}, Pid2, #{tags => [service]}},
+    {{global, service, db}, Pid3, #{tags => [service]}}
+]).
+
+%% Re-run same batch with new Pid for api (different process)
+{ok, [E1_existing, E2_new, E3_new]} = orca:register_batch([
+    {{global, service, api}, Pid1, Meta},  %% Returns existing E1 (Pid1 still registered)
+    {{global, service, cache}, Pid2_new, Meta},  %% Registers new Pid2_new
+    {{global, service, db}, Pid3_new, Meta}  %% Registers new Pid3_new
+]).
+```
+
+This allows safe batch re-registration - existing services aren't replaced if still running. If you need to replace a running process, unregister it first or use `register/3` with a specific Pid.
 
 ### Q: Can I use orca with a distributed system?
 

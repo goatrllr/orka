@@ -38,6 +38,7 @@
 	test_register_with_existing_returns_entry/1,
 	test_register_with_failure/1,
 	test_register_with_badarg/1,
+	test_register_with_duplicate_tags/1,
 	test_register_single/1,
 	test_register_single_constraint/1,
 	test_register_single_same_key_returns_existing/1,
@@ -52,7 +53,12 @@
 	test_register_batch_basic/1,
 	test_register_batch_with_explicit_pids/1,
 	test_register_batch_per_user/1,
-	test_register_batch_existing_entry/1
+	test_register_batch_existing_entry/1,
+	test_register_batch_with_basic/1,
+	test_register_batch_with_failure/1,
+	test_register_batch_with_badarg/1,
+	test_unregister_removes_monitor/1,
+	test_register_batch_rollback_removes_monitor/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -95,6 +101,7 @@ all() ->
 		test_register_with_existing_returns_entry,
 		test_register_with_failure,
 		test_register_with_badarg,
+		test_register_with_duplicate_tags,
 		test_register_single,
 		test_register_single_constraint,
 		test_register_single_same_key_returns_existing,
@@ -109,7 +116,12 @@ all() ->
 		test_register_batch_basic,
 		test_register_batch_with_explicit_pids,
 		test_register_batch_per_user,
-		test_register_batch_existing_entry
+		test_register_batch_existing_entry,
+		test_register_batch_with_basic,
+		test_register_batch_with_failure,
+		test_register_batch_with_badarg,
+		test_unregister_removes_monitor,
+		test_register_batch_rollback_removes_monitor
 	].
 
 init_per_suite(Config) ->
@@ -375,7 +387,7 @@ test_add_tag_idempotent(Config) ->
 %% @doc Test register_batch/1 invalid input returns badarg
 test_register_batch_invalid_input(Config) ->
 	{error, badarg} = orca:register_batch([{invalid}]),
-	{error, badarg} = orca:register_batch([{global, service, bad}, not_a_map]),
+	{error, badarg} = orca:register_batch([{global, service, bad}, self(), not_a_map]),
 	{error, badarg} = orca:register_batch([{global, service, bad}, not_a_pid, #{}]),
 	Config.
 
@@ -653,6 +665,16 @@ test_register_with_badarg(Config) ->
 	{error, badarg} = orca:register_with({global, service, bad}, #{}, not_an_mfa),
 	Config.
 
+%% @doc Test register_with/3 succeeds with duplicate tags (normalized metadata)
+test_register_with_duplicate_tags(Config) ->
+	Key = {global, service, dup_tags},
+	Metadata = #{tags => [service, service, online]},
+	{ok, Pid} = orca:register_with(Key, Metadata, {erlang, spawn, [fun() -> timer:sleep(10000) end]}),
+	{ok, {Key, Pid, StoredMeta}} = orca:lookup(Key),
+	NormalizedMeta = normalize_tags(Metadata),
+	NormalizedMeta = normalize_tags(StoredMeta),
+	Config.
+
 %% @doc Test register_single/3 - singleton constraint
 test_register_single(Config) ->
 	Key = {global, service, config_server},
@@ -903,11 +925,15 @@ test_concurrent_subscribers(Config) ->
 	ct:log("✓ Multiple subscribers all receive notification"),
 	Config.
 
-%% @doc Test batch registration with implicit self() pids
+%% @doc Test batch registration with explicit pids
 test_register_batch_basic(Config) ->
 	Key1 = {global, portfolio, user123},
 	Key2 = {global, technical, user123},
 	Key3 = {global, orders, user123},
+
+	P1 = spawn(fun() -> timer:sleep(10000) end),
+	P2 = spawn(fun() -> timer:sleep(10000) end),
+	P3 = spawn(fun() -> timer:sleep(10000) end),
 	
 	Meta1 = #{tags => [portfolio, user], properties => #{strategy => momentum}},
 	Meta2 = #{tags => [technical, user], properties => #{indicators => [rsi]}},
@@ -915,20 +941,20 @@ test_register_batch_basic(Config) ->
 	
 	%% Register 3 services for user in one call
 	{ok, Entries} = orca:register_batch([
-		{Key1, Meta1},
-		{Key2, Meta2},
-		{Key3, Meta3}
+		{Key1, P1, Meta1},
+		{Key2, P2, Meta2},
+		{Key3, P3, Meta3}
 	]),
 	
 	%% Should get all 3 entries back
 	3 = length(Entries),
 	
 	%% Each should be found
-	{ok, {Key1, _, Meta1}} = orca:lookup(Key1),
-	{ok, {Key2, _, Meta2}} = orca:lookup(Key2),
-	{ok, {Key3, _, Meta3}} = orca:lookup(Key3),
+	{ok, {Key1, P1, Meta1}} = orca:lookup(Key1),
+	{ok, {Key2, P2, Meta2}} = orca:lookup(Key2),
+	{ok, {Key3, P3, Meta3}} = orca:lookup(Key3),
 	
-	ct:log("✓ Batch registration with implicit pids works"),
+	ct:log("✓ Batch registration with explicit pids works"),
 	Config.
 
 %% @doc Test batch registration with explicit Pids
@@ -980,7 +1006,8 @@ test_register_batch_per_user(Config) ->
 	%% Build registration list for batch
 	RegList = lists:map(fun({Service, Meta}) ->
 		Key = {global, Service, UserId},
-		{Key, Meta}
+		Pid = spawn(fun() -> timer:sleep(10000) end),
+		{Key, Pid, Meta}
 	end, Services),
 	
 	%% Register all in one batch
@@ -1020,6 +1047,76 @@ test_register_batch_existing_entry(Config) ->
 	{ok, {Key, Pid1, _}} = orca:lookup(Key),
 	Config.
 
+%% @doc Test register_batch_with/1 starts and registers processes
+test_register_batch_with_basic(Config) ->
+	Key1 = {global, service, batch_with_1},
+	Key2 = {global, service, batch_with_2},
+	Metadata = #{tags => [service]},
+
+	{ok, Entries} = orca:register_batch_with([
+		{Key1, Metadata, {erlang, spawn, [fun() -> timer:sleep(10000) end]}},
+		{Key2, Metadata, {erlang, spawn, [fun() -> timer:sleep(10000) end]}}
+	]),
+	2 = length(Entries),
+	{ok, {Key1, Pid1, _}} = orca:lookup(Key1),
+	{ok, {Key2, Pid2, _}} = orca:lookup(Key2),
+	true = is_process_alive(Pid1),
+	true = is_process_alive(Pid2),
+	Config.
+
+%% @doc Test register_batch_with/1 rolls back on failure
+test_register_batch_with_failure(Config) ->
+	Key1 = {global, service, batch_with_ok},
+	Key2 = {global, service, batch_with_fail},
+	Metadata = #{tags => [service]},
+	FailingMFA = {erlang, apply, [fun() -> error(test_error) end, []]},
+
+	{error, {_Reason, _Failed, _Entries}} = orca:register_batch_with([
+		{Key1, Metadata, {erlang, spawn, [fun() -> timer:sleep(10000) end]}},
+		{Key2, Metadata, FailingMFA}
+	]),
+	not_found = orca:lookup(Key1),
+	not_found = orca:lookup(Key2),
+	Config.
+
+%% @doc Test register_batch_with/1 invalid input returns badarg
+test_register_batch_with_badarg(Config) ->
+	{error, badarg} = orca:register_batch_with([{invalid}]),
+	{error, badarg} = orca:register_batch_with([{key, #{}, not_an_mfa}]),
+	{error, badarg} = orca:register_batch_with([{key, not_a_map, {erlang, spawn, []}}]),
+	Config.
+
+%% @doc Test unregister removes monitor for pid
+test_unregister_removes_monitor(Config) ->
+	Key = {global, service, monitor_cleanup},
+	Pid = spawn(fun() -> receive after 10000 -> ok end end),
+
+	{ok, _} = orca:register(Key, Pid, #{tags => [service]}),
+	Monitors1 = get_monitors(),
+	true = lists:member({process, Pid}, Monitors1),
+
+	ok = orca:unregister(Key),
+	Monitors2 = get_monitors(),
+	false = lists:member({process, Pid}, Monitors2),
+	Config.
+
+%% @doc Test batch rollback removes monitor for partially registered pid
+test_register_batch_rollback_removes_monitor(Config) ->
+	Key1 = {global, service, batch_ok},
+	Key2 = {global, service, singleton_key},
+	Key3 = {global, service, batch_conflict},
+	Pid1 = spawn(fun() -> receive after 10000 -> ok end end),
+	Pid2 = spawn(fun() -> receive after 10000 -> ok end end),
+
+	{ok, _} = orca:register_single(Key2, Pid2, #{tags => [service]}),
+	{error, {_, _Failed, _Entries}} =
+		orca:register_batch([{Key1, Pid1, #{tags => [service]}}, {Key3, Pid2, #{tags => [service]}}]),
+
+	not_found = orca:lookup(Key1),
+	Monitors = get_monitors(),
+	false = lists:member({process, Pid1}, Monitors),
+	Config.
+
 %% Helper functions
 receive_timeout(Timeout) ->
 	receive
@@ -1032,6 +1129,12 @@ normalize_tags(Metadata) ->
 		undefined -> Metadata;
 		Tags when is_list(Tags) -> maps:put(tags, lists:usort(Tags), Metadata);
 		_ -> Metadata
+	end.
+
+get_monitors() ->
+	case process_info(whereis(orca), monitors) of
+		{monitors, Monitors} -> Monitors;
+		_ -> []
 	end.
 
 wait_for_pids([], _Timeout) -> ok;

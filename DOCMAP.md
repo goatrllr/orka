@@ -200,4 +200,4 @@ pandoc -o orca_guide.pdf README.md API.md docs/*.md
 
 **Total Documentation**: ~140KB | **Files**: 10 core + 3 extensions | **Examples**: 30+ | **Patterns**: 8 + 3 extension ideas
 
-Last updated: December 2025
+Last updated: January 2026

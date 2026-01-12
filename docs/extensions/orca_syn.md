@@ -305,23 +305,23 @@ Multi-node trading workspace with per-user distributed service groups.
 %% Create workspace: register on local node + join global group
 create_workspace(UserId) ->
     {ok, Entries} = orca:register_batch([
-        {{global, portfolio, UserId}, #{
+        {{global, portfolio, UserId}, PortfolioPid, #{
             tags => [UserId, portfolio],
             properties => #{service_type => portfolio, node => node()}
         }},
-        {{global, technical, UserId}, #{
+        {{global, technical, UserId}, TechnicalPid, #{
             tags => [UserId, technical],
             properties => #{service_type => technical, node => node()}
         }},
-        {{global, orders, UserId}, #{
+        {{global, orders, UserId}, OrdersPid, #{
             tags => [UserId, orders],
             properties => #{service_type => orders, node => node()}
         }},
-        {{global, risk, UserId}, #{
+        {{global, risk, UserId}, RiskPid, #{
             tags => [UserId, risk],
             properties => #{service_type => risk, node => node()}
         }},
-        {{global, monitoring, UserId}, #{
+        {{global, monitoring, UserId}, MonitoringPid, #{
             tags => [UserId, monitoring],
             properties => #{service_type => monitoring, node => node()}
         }}
@@ -624,4 +624,3 @@ end.
 ### Issue: Too much metadata duplication
 **Cause**: Storing same metadata in both orca and syn
 **Solution**: Store minimal metadata in syn, use tags for filtering.
-

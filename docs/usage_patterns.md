@@ -511,14 +511,23 @@ Does your service need another service to start?
 **Use when**: You're registering multiple processes for a single context (e.g., per-user services, per-job workers) and want to minimize GenServer calls.
 
 ```erlang
-%% Register 5 processes for a user in a single call
+%% Register 5 processes for a user in a single call (explicit Pids)
 UserId = user123,
 {ok, Entries} = orca:register_batch([
-    {{global, portfolio, UserId}, #{tags => [portfolio, user], properties => #{strategy => momentum}}},
-    {{global, technical, UserId}, #{tags => [technical, user], properties => #{indicators => [rsi, macd]}}},
-    {{global, fundamental, UserId}, #{tags => [fundamental, user], properties => #{sectors => [tech, finance]}}},
-    {{global, orders, UserId}, #{tags => [orders, user], properties => #{queue_depth => 100}}},
-    {{global, risk, UserId}, #{tags => [risk, user], properties => #{max_position_size => 10000}}}
+    {{global, portfolio, UserId}, PortfolioPid, #{tags => [portfolio, user], properties => #{strategy => momentum}}},
+    {{global, technical, UserId}, TechnicalPid, #{tags => [technical, user], properties => #{indicators => [rsi, macd]}}},
+    {{global, fundamental, UserId}, FundamentalPid, #{tags => [fundamental, user], properties => #{sectors => [tech, finance]}}},
+    {{global, orders, UserId}, OrdersPid, #{tags => [orders, user], properties => #{queue_depth => 100}}},
+    {{global, risk, UserId}, RiskPid, #{tags => [risk, user], properties => #{max_position_size => 10000}}}
+]).
+
+%% Or start and register in a single call
+{ok, Entries} = orca:register_batch_with([
+    {{global, portfolio, UserId}, #{tags => [portfolio, user]}, {portfolio_service, start_link, [UserId]}},
+    {{global, technical, UserId}, #{tags => [technical, user]}, {technical_service, start_link, [UserId]}},
+    {{global, fundamental, UserId}, #{tags => [fundamental, user]}, {fundamental_service, start_link, [UserId]}},
+    {{global, orders, UserId}, #{tags => [orders, user]}, {order_service, start_link, [UserId]}},
+    {{global, risk, UserId}, #{tags => [risk, user]}, {risk_service, start_link, [UserId]}}
 ]).
 ```
 
@@ -564,14 +573,18 @@ init([UserId]) ->
 
 **Batch API Signature**:
 ```erlang
--spec register_batch([{Key, Metadata} | {Key, Pid, Metadata}]) -> 
+-spec register_batch([{Key, Pid, Metadata}]) ->
+    {ok, [Entry]} | {error, {FirstFailure, FailedKeys, SuccessfulEntries}}.
+
+-spec register_batch_with([{Key, Metadata, {M, F, A}}]) ->
     {ok, [Entry]} | {error, {FirstFailure, FailedKeys, SuccessfulEntries}}.
 ```
 
-- Input can be `{Key, Metadata}` (uses `self()`) or `{Key, Pid, Metadata}`
 - Returns all entries on success
 - Returns detailed error on failure with list of failed keys
-- All-or-nothing semantics: failure rolls back successful registrations
+- **Key behavior**: If a key is already registered with a live process, the existing entry is returned and processing continues (doesn't fail the batch)
+- **Rollback semantics**: Only newly registered entries are rolled back on failure; pre-existing entries remain
+- On failure in `register_batch_with`: newly started processes are terminated, but previously running processes continue
 
 **When to Use**:
 - ✓ Per-user services (trading apps, workspace managers)

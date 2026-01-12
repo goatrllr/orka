@@ -5,6 +5,7 @@
 -export([start_link/0]).
 -export([register/2, register/3]).
 -export([register_batch/1]).
+-export([register_batch_with/1]).
 -export([register_with/3]).
 -export([register_single/2, register_single/3]).
 -export([unregister/1]).
@@ -240,7 +241,7 @@ register_single(_Key, _Pid, _Metadata) ->
 %% Reduces GenServer call overhead when registering many processes for a single context
 %% (e.g., per-user services, per-job workers). All registrations succeed or all fail.
 %%
-%% Input: List of {Key, Metadata} or {Key, Pid, Metadata} tuples
+%% Input: List of {Key, Pid, Metadata} tuples
 %% Returns: {ok, [Entry]} where Entry = {Key, Pid, Metadata}
 %%          {error, {RegistrationFailed, [FailedKeys], [SuccessfulKeys]}} on partial failure
 %%
@@ -255,19 +256,11 @@ register_single(_Key, _Pid, _Metadata) ->
 %% UserId = user123,
 %% {ok, [PortfolioEntry, TechnicalEntry, FundamentalEntry, OrdersEntry, RiskEntry]} =
 %%     orca:register_batch([
-%%         {{global, portfolio, UserId}, #{tags => [portfolio, user], properties => #{strategy => momentum}}},
-%%         {{global, technical, UserId}, #{tags => [technical, user], properties => #{indicators => [rsi, macd]}}},
-%%         {{global, fundamental, UserId}, #{tags => [fundamental, user], properties => #{sectors => [tech, finance]}}},
-%%         {{global, orders, UserId}, #{tags => [orders, user], properties => #{queue_depth => 100}}},
-%%         {{global, risk, UserId}, #{tags => [risk, user], properties => #{max_position_size => 10000}}}
-%%     ]).
-%%
-%% %% Register with explicit Pids
-%% {ok, [Entry1, Entry2, Entry3]} =
-%%     orca:register_batch([
-%%         {{global, worker, job1}, WorkerPid1, #{tags => [worker, job]}},
-%%         {{global, worker, job2}, WorkerPid2, #{tags => [worker, job]}},
-%%         {{global, worker, job3}, WorkerPid3, #{tags => [worker, job]}}
+%%         {{global, portfolio, UserId}, Pid1, #{tags => [portfolio, user], properties => #{strategy => momentum}}},
+%%         {{global, technical, UserId}, Pid2, #{tags => [technical, user], properties => #{indicators => [rsi, macd]}}},
+%%         {{global, fundamental, UserId}, Pid3, #{tags => [fundamental, user], properties => #{sectors => [tech, finance]}}},
+%%         {{global, orders, UserId}, Pid4, #{tags => [orders, user], properties => #{queue_depth => 100}}},
+%%         {{global, risk, UserId}, Pid5, #{tags => [risk, user], properties => #{max_position_size => 10000}}}
 %%     ]).
 register_batch(Registrations) ->
 	case validate_batch_registrations(Registrations) of
@@ -275,10 +268,19 @@ register_batch(Registrations) ->
 		error -> {error, badarg}
 	end.
 
+%% @doc Start multiple processes using {Module, Function, Arguments} and register them atomically.
+%%
+%% Input: List of {Key, Metadata, {M, F, A}} tuples
+%% Returns: {ok, [Entry]} where Entry = {Key, Pid, Metadata}
+%%          {error, {Reason, [FailedKeys], [SuccessfulKeys]}} on partial failure
+register_batch_with(Registrations) ->
+	case validate_batch_with_registrations(Registrations) of
+		ok -> gen_server:call(?MODULE, {register_batch_with, Registrations});
+		error -> {error, badarg}
+	end.
+
 validate_batch_registrations(Registrations) when is_list(Registrations) ->
 	case lists:all(fun
-		({_Key, Metadata}) when is_map(Metadata) ->
-			true;
 		({_Key, Pid, Metadata}) when is_pid(Pid), is_map(Metadata) ->
 			true;
 		(_) ->
@@ -288,6 +290,19 @@ validate_batch_registrations(Registrations) when is_list(Registrations) ->
 		false -> error
 	end;
 validate_batch_registrations(_Registrations) ->
+	error.
+
+validate_batch_with_registrations(Registrations) when is_list(Registrations) ->
+	case lists:all(fun
+		({_Key, Metadata, {M, F, A}}) when is_map(Metadata), is_atom(M), is_atom(F), is_list(A) ->
+			true;
+		(_) ->
+			false
+	end, Registrations) of
+		true -> ok;
+		false -> error
+	end;
+validate_batch_with_registrations(_Registrations) ->
 	error.
 
 %% @doc Unregister a process from the registry by key.
@@ -828,48 +843,56 @@ init([]) ->
 		public,        %% allow read access from any process
 		named_table    %% allow access by name
 	]),
-	%% Store for tracking monitored pids -> keys mapping and subscribers
-	%% State is tuple: {PidSingletonMap, PidKeyMap, SubscribersMap}
+	%% Store for tracking monitored pids -> keys mapping, subscribers, and monitor refs
+	%% State is tuple: {PidSingletonMap, PidKeyMap, SubscribersMap, MonitorMap}
 	%% PidSingletonMap: #{Pid => Key} for singleton constraint tracking
 	%% PidKeyMap: #{Pid => [Keys]} for multi-key tracking
 	%% SubscribersMap: #{Key => [Pid | {Pid, TimerRef}]} for await/subscribe notifications
-	{ok, {maps:new(), maps:new(), maps:new()}}.
+	%% MonitorMap: #{Pid => MonitorRef}
+	{ok, {maps:new(), maps:new(), maps:new(), maps:new()}}.
 
 %% @doc Handle registration requests
-handle_call({register, Key, Pid, Metadata}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
+handle_call(Msg, From, {PidSingleton, PidKeyMap, Subscribers}) ->
+	%% Upgrade legacy state without MonitorMap
+	handle_call(Msg, From, {PidSingleton, PidKeyMap, Subscribers, maps:new()});
+handle_call({register, Key, Pid, Metadata}, _From, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	case maps:get(Pid, PidSingleton, undefined) of
 		undefined ->
 			case ets:lookup(?REGISTRY_TABLE, Key) of
 				%% Key not registered yet, proceed with registration
 				[] ->
-					do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers});
+					do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap});
 				%% If this key was previously registered, check if the process is alive
 				[{Key, ExistingPid, _ExistingMetadata} = Entry] ->
 					case is_process_alive(ExistingPid) of
 						true ->
 							%% Process is alive, return the existing registration
-							{reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers}};
+							{reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
 						false ->
 							%% Process is dead but entry still in ETS, clean it up and re-register
-							NewState = remove_dead_pid_entries(ExistingPid, {PidSingleton, PidKeyMap, Subscribers}),
+							NewState = remove_dead_pid_entries(ExistingPid, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}),
 							do_register(Key, Pid, Metadata, NewState)
 					end
 			end;
 		ExistingKey when ExistingKey =:= Key ->
 			case ets:lookup(?REGISTRY_TABLE, Key) of
-				[Entry] -> {reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers}};
-				[] -> do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers})
+				[Entry] -> {reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
+				[] -> do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap})
 			end;
 		ExistingKey ->
-			{reply, {error, {already_registered_under_key, ExistingKey}}, {PidSingleton, PidKeyMap, Subscribers}}
+			{reply, {error, {already_registered_under_key, ExistingKey}}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 	end;
 
 %% @doc Handle batch registration - all or nothing
 handle_call({register_batch, Registrations}, _From, State) ->
 	register_batch_entries(Registrations, State, State, [], [], []);
 
+%% @doc Handle batch register_with requests
+handle_call({register_batch_with, Registrations}, _From, State) ->
+	register_batch_with_entries(Registrations, State, State, [], [], [], []);
+
 %% @doc Handle unregistration requests
-handle_call({unregister, Key}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
+handle_call({unregister, Key}, _From, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	Result = case ets:lookup(?REGISTRY_TABLE, Key) of
 		[{Key, Pid, _}] ->
 			%% Remove from ETS
@@ -898,27 +921,31 @@ handle_call({unregister, Key}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
 				[] -> maps:remove(Pid, NewKeyMap);
 				_ -> NewKeyMap
 			end,
+			FinalMonitors = case maps:is_key(Pid, FinalMap) of
+				true -> MonitorMap;
+				false -> maybe_demonitor_pid(Pid, MonitorMap)
+			end,
 			
-			{ok, {NewSingleton, FinalMap, Subscribers}};
+			{ok, {NewSingleton, FinalMap, Subscribers, FinalMonitors}};
 		[] ->
-			{not_found, {PidSingleton, PidKeyMap, Subscribers}}
+			{not_found, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 	end,
 	
 	case Result of
 		{ok, UpdatedState} -> {reply, ok, UpdatedState};
-		{not_found, _} -> {reply, not_found, {PidSingleton, PidKeyMap, Subscribers}}
+		{not_found, _} -> {reply, not_found, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 	end;
 
 %% @doc Handle adding a tag
-handle_call({add_tag, Key, Tag}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
+handle_call({add_tag, Key, Tag}, _From, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	case ets:lookup(?REGISTRY_TABLE, Key) of
 		[{Key, Pid, Metadata}] ->
 			Tags = maps:get(tags, Metadata, []),
 			case lists:member(Tag, Tags) of
 				true ->
 					%% Tag already exists
-					% {reply, {error, tag_already_exists}, {PidSingleton, PidKeyMap, Subscribers}};
-					{reply, ok, {PidSingleton, PidKeyMap, Subscribers}};
+					% {reply, {error, tag_already_exists}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
+					{reply, ok, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
 				false ->
 					%% Add tag to metadata
 					NewTags = [Tag | Tags],
@@ -928,19 +955,19 @@ handle_call({add_tag, Key, Tag}, _From, {PidSingleton, PidKeyMap, Subscribers}) 
 					%% Add to tag index
 					ets:insert(?TAG_INDEX_TABLE, {{tag, Tag}, Key}),
 					
-					{reply, ok, {PidSingleton, PidKeyMap, Subscribers}}
+					{reply, ok, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 		end;
 		[] ->
-			{reply, not_found, {PidSingleton, PidKeyMap, Subscribers}}
+			{reply, not_found, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 	end;%% @doc Handle removing a tag
-handle_call({remove_tag, Key, Tag}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
+handle_call({remove_tag, Key, Tag}, _From, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	case ets:lookup(?REGISTRY_TABLE, Key) of
 		[{Key, Pid, Metadata}] ->
 			Tags = maps:get(tags, Metadata, []),
 			case lists:member(Tag, Tags) of
 				false ->
 					%% Tag doesn't exist
-					{reply, {error, tag_not_found}, {PidSingleton, PidKeyMap, Subscribers}};
+					{reply, {error, tag_not_found}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
 				true ->
 					%% Remove tag from metadata
 					NewTags = lists:delete(Tag, Tags),
@@ -950,12 +977,12 @@ handle_call({remove_tag, Key, Tag}, _From, {PidSingleton, PidKeyMap, Subscribers
 					%% Remove from tag index
 					ets:delete_object(?TAG_INDEX_TABLE, {{tag, Tag}, Key}),
 					
-					{reply, ok, {PidSingleton, PidKeyMap, Subscribers}}
+					{reply, ok, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 		end;
 		[] ->
-			{reply, not_found, {PidSingleton, PidKeyMap, Subscribers}}
+			{reply, not_found, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 	end;%% @doc Handle updating metadata (preserves tags)
-handle_call({update_metadata, Key, NewMetadata}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
+handle_call({update_metadata, Key, NewMetadata}, _From, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	case ets:lookup(?REGISTRY_TABLE, Key) of
 		[{Key, Pid, OldMetadata}] ->
 			%% Preserve existing tags
@@ -963,12 +990,12 @@ handle_call({update_metadata, Key, NewMetadata}, _From, {PidSingleton, PidKeyMap
 			UpdatedMetadata = normalize_tags(maps:put(tags, Tags, NewMetadata)),
 			ets:insert(?REGISTRY_TABLE, {Key, Pid, UpdatedMetadata}),
 			update_property_index(Key, UpdatedMetadata),
-			{reply, ok, {PidSingleton, PidKeyMap, Subscribers}};
+			{reply, ok, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
 		[] ->
-			{reply, not_found, {PidSingleton, PidKeyMap, Subscribers}}
+			{reply, not_found, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 	end;
 
-handle_call({register_property, Key, Pid, PropName, PropValue}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
+handle_call({register_property, Key, Pid, PropName, PropValue}, _From, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	case ets:lookup(?REGISTRY_TABLE, Key) of
 		[{Key, RegisteredPid, Metadata}] when RegisteredPid =:= Pid ->
 			%% Key exists and Pid matches, update metadata and index
@@ -977,30 +1004,30 @@ handle_call({register_property, Key, Pid, PropName, PropValue}, _From, {PidSingl
 			UpdatedMetadata = maps:put(properties, NewProps, Metadata),
 			ets:insert(?REGISTRY_TABLE, {Key, Pid, UpdatedMetadata}),
 			update_property_index(Key, UpdatedMetadata),
-			{reply, ok, {PidSingleton, PidKeyMap, Subscribers}};
+			{reply, ok, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
 		[] ->
 			%% Key not found
-			{reply, not_found, {PidSingleton, PidKeyMap, Subscribers}};
+			{reply, not_found, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
 		[{Key, _OtherPid, _Metadata}] ->
 			%% Key exists but Pid doesn't match
-			{reply, {error, pid_mismatch}, {PidSingleton, PidKeyMap, Subscribers}}
+			{reply, {error, pid_mismatch}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 	end;
 
-handle_call({register_with, Key, Metadata, M, F, A}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
+handle_call({register_with, Key, Metadata, M, F, A}, _From, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	case ets:lookup(?REGISTRY_TABLE, Key) of
 		[{Key, ExistingPid, _ExistingMetadata} = Entry] ->
 			case is_process_alive(ExistingPid) of
 				true ->
-					{reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers}};
+					{reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
 				false ->
-					NewState = remove_dead_pid_entries(ExistingPid, {PidSingleton, PidKeyMap, Subscribers}),
+					NewState = remove_dead_pid_entries(ExistingPid, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}),
 					register_with_start(Key, Metadata, M, F, A, NewState)
 			end;
 		[] ->
-			register_with_start(Key, Metadata, M, F, A, {PidSingleton, PidKeyMap, Subscribers})
+			register_with_start(Key, Metadata, M, F, A, {PidSingleton, PidKeyMap, Subscribers, MonitorMap})
 	end;
 
-handle_call({register_single, Key, Pid, Metadata}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
+handle_call({register_single, Key, Pid, Metadata}, _From, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	%% Check if this Pid is already registered as singleton
 	case maps:get(Pid, PidSingleton, undefined) of
 		undefined ->
@@ -1008,20 +1035,20 @@ handle_call({register_single, Key, Pid, Metadata}, _From, {PidSingleton, PidKeyM
 			case maps:get(Pid, PidKeyMap, []) of
 				[] ->
 					%% Pid not registered, proceed with registration
-						case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
-							{reply, Reply, {UpdatedSingleton, UpdatedKeyMap, UpdatedSubs}} ->
-								case Reply of
-									{ok, Entry} ->
-										%% Add to singleton map
-										NewSingleton = maps:put(Pid, Key, UpdatedSingleton),
-										{reply, {ok, Entry}, {NewSingleton, UpdatedKeyMap, UpdatedSubs}};
-									_ ->
-										{reply, Reply, {PidSingleton, PidKeyMap, Subscribers}}
-								end
-						end;
+					case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) of
+						{reply, Reply, {UpdatedSingleton, UpdatedKeyMap, UpdatedSubs, UpdatedMonitors}} ->
+							case Reply of
+								{ok, Entry} ->
+									%% Add to singleton map
+									NewSingleton = maps:put(Pid, Key, UpdatedSingleton),
+									{reply, {ok, Entry}, {NewSingleton, UpdatedKeyMap, UpdatedSubs, UpdatedMonitors}};
+								_ ->
+									{reply, Reply, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
+							end
+					end;
 				_ExistingKeys ->
 					%% Pid already has non-singleton registrations
-					{reply, {error, {already_registered, _ExistingKeys}}, {PidSingleton, PidKeyMap, Subscribers}}
+					{reply, {error, {already_registered, _ExistingKeys}}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 			end;
 		ExistingKey ->
 			%% Pid already registered as singleton
@@ -1029,23 +1056,23 @@ handle_call({register_single, Key, Pid, Metadata}, _From, {PidSingleton, PidKeyM
 				true ->
 					case ets:lookup(?REGISTRY_TABLE, ExistingKey) of
 						[Entry] ->
-							{reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers}};
+							{reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
 						[] ->
 							%% Stale singleton entry, allow re-registration under requested key
-							do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers})
+							do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap})
 					end;
 				false ->
-					{reply, {error, {already_registered_under_key, ExistingKey}}, {PidSingleton, PidKeyMap, Subscribers}}
+					{reply, {error, {already_registered_under_key, ExistingKey}}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 			end
 	end;
 
 %% @doc Handle subscribe-await requests - non-blocking subscription with timeout tracking
-handle_call({subscribe_await, Key, CallerPid, Timeout}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
+handle_call({subscribe_await, Key, CallerPid, Timeout}, _From, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	case ets:lookup(?REGISTRY_TABLE, Key) of
 		[Entry] ->
 			%% Key already registered, send notification immediately
 			CallerPid ! {orca_registered, Key, Entry},
-			{reply, ok, {PidSingleton, PidKeyMap, Subscribers}};
+			{reply, ok, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
 		[] ->
 			%% Key not registered, add to subscribers map with optional timer
 			SubscribersList = maps:get(Key, Subscribers, []),
@@ -1061,29 +1088,29 @@ handle_call({subscribe_await, Key, CallerPid, Timeout}, _From, {PidSingleton, Pi
 					CallerPid
 			end,
 			NewSubscribers = maps:put(Key, [SubEntry | SubscribersList], Subscribers),
-			{reply, ok, {PidSingleton, PidKeyMap, NewSubscribers}}
+			{reply, ok, {PidSingleton, PidKeyMap, NewSubscribers, MonitorMap}}
 	end;
 
 %% @doc Handle subscribe requests - non-blocking subscription to key registration
-handle_call({subscribe, Key, CallerPid}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
+handle_call({subscribe, Key, CallerPid}, _From, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	case ets:lookup(?REGISTRY_TABLE, Key) of
 		[Entry] ->
 			%% Key already registered, send notification immediately
 			CallerPid ! {orca_registered, Key, Entry},
-			{reply, ok, {PidSingleton, PidKeyMap, Subscribers}};
+			{reply, ok, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
 		[] ->
 			%% Key not registered, add to subscribers map
 			SubscribersList = maps:get(Key, Subscribers, []),
 			NewSubscribers = maps:put(Key, [CallerPid | SubscribersList], Subscribers),
-			{reply, ok, {PidSingleton, PidKeyMap, NewSubscribers}}
+			{reply, ok, {PidSingleton, PidKeyMap, NewSubscribers, MonitorMap}}
 	end;
 
 %% @doc Handle unsubscribe requests - cancel subscription to key registration
-handle_call({unsubscribe, Key, CallerPid}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
+handle_call({unsubscribe, Key, CallerPid}, _From, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	case maps:get(Key, Subscribers, []) of
 		[] ->
 			%% No subscribers for this key
-			{reply, ok, {PidSingleton, PidKeyMap, Subscribers}};
+			{reply, ok, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
 		SubscribersList ->
 			%% Remove CallerPid from subscribers (handle both plain Pid and {Pid, TimerRef} formats)
 			NewList = lists:filter(fun
@@ -1104,13 +1131,16 @@ handle_call({unsubscribe, Key, CallerPid}, _From, {PidSingleton, PidKeyMap, Subs
 				[] -> maps:remove(Key, Subscribers);
 				_ -> maps:put(Key, NewList, Subscribers)
 			end,
-			{reply, ok, {PidSingleton, PidKeyMap, NewSubscribers}}
+			{reply, ok, {PidSingleton, PidKeyMap, NewSubscribers, MonitorMap}}
 	end.
 
 %% @doc Handle process 'DOWN' messages from monitors
-handle_info({'DOWN', _Ref, process, Pid, _Reason}, {PidSingleton, PidKeyMap, Subscribers}) ->
+handle_info(Info, {PidSingleton, PidKeyMap, Subscribers}) ->
+	%% Upgrade legacy state without MonitorMap
+	handle_info(Info, {PidSingleton, PidKeyMap, Subscribers, maps:new()});
+handle_info({'DOWN', _Ref, process, Pid, _Reason}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	%% Get all keys associated with this pid
-	NewState = remove_dead_pid_entries(Pid, {PidSingleton, PidKeyMap, Subscribers}),
+	NewState = remove_dead_pid_entries(Pid, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}),
 	{noreply, NewState};
 
 %% Ignore any other info messages
@@ -1118,6 +1148,9 @@ handle_info(_Info, State) ->
 	{noreply, State}.
 
 %% @doc Handle async messages (not used currently)
+handle_cast(Msg, {PidSingleton, PidKeyMap, Subscribers}) ->
+	%% Upgrade legacy state without MonitorMap
+	handle_cast(Msg, {PidSingleton, PidKeyMap, Subscribers, maps:new()});
 handle_cast(_Msg, State) ->
 	{noreply, State}.
 
@@ -1137,12 +1170,9 @@ code_change(_OldVsn, State, _Extra) ->
 %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %% @doc Perform the actual registration (fast path)
-do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) ->
+do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
     %% Monitor the pid only if it's new to the registry
-    case maps:get(Pid, PidKeyMap, []) of
-        [] -> monitor(process, Pid);
-        _ -> ok
-    end,
+	{NewMonitorMap, _} = maybe_monitor_pid(Pid, PidKeyMap, MonitorMap),
 
     %% Insert new entry into ETS
 	NormalizedMetadata = normalize_tags(Metadata),
@@ -1168,74 +1198,51 @@ do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) ->
     %% Notify any subscribers waiting for this key
     NewSubscribers = notify_subscribers(Key, Entry, Subscribers),
     
-    {reply, {ok, Entry}, {PidSingleton, NewPidKeyMap, NewSubscribers}}.
+    {reply, {ok, Entry}, {PidSingleton, NewPidKeyMap, NewSubscribers, NewMonitorMap}}.
 
-register_with_start(Key, Metadata, M, F, A, {PidSingleton, PidKeyMap, Subscribers}) ->
+register_with_start(Key, Metadata, M, F, A, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	%% Try to start the process
 	try erlang:apply(M, F, A) of
 		{ok, Pid} ->
 			%% Process started successfully, now register it
-			maybe_do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers});
-			% case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
-			% 	{reply, {ok, {Key, Pid, Metadata}}, UpdatedState} ->
-			% 		{reply, {ok, Pid}, UpdatedState};
-			% 	{reply, {error, Reason}, _} ->
-			% 		%% Registration failed, terminate the process
-			% 		exit(Pid, kill),
-			% 		{reply, {error, {registration_failed, Reason}}, {PidSingleton, PidKeyMap, Subscribers}};
-			% 	Error ->
-			% 		%% Unexpected error, terminate the process
-			% 		exit(Pid, kill),
-			% 		{reply, {error, Error}, {PidSingleton, PidKeyMap, Subscribers}}
-			% end;
+			case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) of
+				{reply, {ok, {_, Pid, _}}, UpdatedState} ->
+					{reply, {ok, Pid}, UpdatedState};
+				{reply, {error, Reason}, _} ->
+					%% Registration failed, terminate the process
+					exit(Pid, kill),
+					{reply, {error, {registration_failed, Reason}}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
+				Error ->
+					%% Unexpected error, terminate the process
+					exit(Pid, kill),
+					{reply, {error, Error}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
+			end;
 		Pid when is_pid(Pid) ->
 			%% Process started and returned Pid directly (not in {ok, Pid} tuple)
-			maybe_do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers});
-			% case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
-			% 	{reply, {ok, {Key, Pid, Metadata}}, UpdatedState} ->
-			% 		{reply, {ok, Pid}, UpdatedState};
-			% 	{reply, {error, Reason}, _} ->
-			% 		%% Registration failed, terminate the process
-			% 		exit(Pid, kill),
-			% 		{reply, {error, {registration_failed, Reason}}, {PidSingleton, PidKeyMap, Subscribers}};
-			% 	Error ->
-			% 		%% Unexpected error, terminate the process
-			% 		exit(Pid, kill),
-			% 		{reply, {error, Error}, {PidSingleton, PidKeyMap, Subscribers}}
-			% end;
+			case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) of
+				{reply, {ok, {_, Pid, _}}, UpdatedState} ->
+					{reply, {ok, Pid}, UpdatedState};
+				{reply, {error, Reason}, _} ->
+					%% Registration failed, terminate the process
+					exit(Pid, kill),
+					{reply, {error, {registration_failed, Reason}}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
+				Error ->
+					%% Unexpected error, terminate the process
+					exit(Pid, kill),
+					{reply, {error, Error}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
+			end;
 		Other ->
 			%% MFA returned something unexpected
-			{reply, {error, {invalid_return, Other}}, {PidSingleton, PidKeyMap, Subscribers}}
+			{reply, {error, {invalid_return, Other}}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 	catch
 		Error:Reason ->
-			{reply, {error, {Error, Reason}}, {PidSingleton, PidKeyMap, Subscribers}}
-	end.
-
-maybe_do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) ->
-	case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
-		{reply, {ok, {Key, Pid, Metadata}}, UpdatedState} ->
-			{reply, {ok, Pid}, UpdatedState};
-		{reply, {error, Reason}, _} ->
-			%% Registration failed, terminate the process
-			exit(Pid, kill),
-			{reply, {error, {registration_failed, Reason}}, {PidSingleton, PidKeyMap, Subscribers}};
-		Error ->
-			%% Unexpected error, terminate the process
-			exit(Pid, kill),
-			{reply, {error, Error}, {PidSingleton, PidKeyMap, Subscribers}}
+			{reply, {error, {Error, Reason}}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 	end.
 
 %% Synchronous version of do_register for batch operations (doesn't return reply tuple)
-do_register_sync(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) ->
+do_register_sync(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
     %% Check if already monitoring this pid
-    case maps:get(Pid, PidKeyMap, []) of
-        [] ->
-            %% First time seeing this pid, monitor it
-            monitor(process, Pid);
-        _ ->
-            %% Already monitoring
-            ok
-    end,
+	{NewMonitorMap, _} = maybe_monitor_pid(Pid, PidKeyMap, MonitorMap),
 
     %% Insert new entry into ETS
 	NormalizedMetadata = normalize_tags(Metadata),
@@ -1261,7 +1268,7 @@ do_register_sync(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) ->
     %% Notify any subscribers waiting for this key
     NewSubscribers = notify_subscribers(Key, Entry, Subscribers),
     
-    {ok, Entry, {PidSingleton, NewPidKeyMap, NewSubscribers}}.
+    {ok, Entry, {PidSingleton, NewPidKeyMap, NewSubscribers, NewMonitorMap}}.
 
 normalize_tags(Metadata) ->
 	case maps:get(tags, Metadata, undefined) of
@@ -1272,6 +1279,32 @@ normalize_tags(Metadata) ->
 		_ ->
 			Metadata
 	end.
+
+maybe_monitor_pid(Pid, PidKeyMap, MonitorMap) ->
+	case maps:get(Pid, PidKeyMap, []) of
+		[] ->
+			Ref = monitor(process, Pid),
+			{maps:put(Pid, Ref, MonitorMap), Ref};
+		_ ->
+			{MonitorMap, undefined}
+	end.
+
+maybe_demonitor_pid(Pid, MonitorMap) ->
+	case maps:take(Pid, MonitorMap) of
+		{Ref, NewMap} ->
+			catch erlang:demonitor(Ref, [flush]),
+			NewMap;
+		error ->
+			MonitorMap
+	end.
+
+cleanup_new_monitors(MonitorMap, PrevMonitorMap) ->
+	lists:foreach(fun({Pid, Ref}) ->
+		case maps:is_key(Pid, PrevMonitorMap) of
+			true -> ok;
+			false -> catch erlang:demonitor(Ref, [flush])
+		end
+	end, maps:to_list(MonitorMap)).
 
 update_property_index(Key, Metadata) ->
 	ets:match_delete(?PROPERTY_INDEX_TABLE, {'_', Key}),
@@ -1284,12 +1317,12 @@ update_property_index(Key, Metadata) ->
 			ok
 	end.
 
-remove_dead_pid_entries(Pid, {PidSingleton, PidKeyMap, Subscribers}) ->
+remove_dead_pid_entries(Pid, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	%% Get all keys associated with this pid
 	case maps:get(Pid, PidKeyMap, []) of
 		[] ->
 			%% No keys tracked for this pid
-			{PidSingleton, PidKeyMap, Subscribers};
+			{PidSingleton, PidKeyMap, Subscribers, MonitorMap};
 		Keys ->
 			%% Remove all entries for this pid from ETS
 			lists:foreach(fun(Key) -> 
@@ -1303,7 +1336,8 @@ remove_dead_pid_entries(Pid, {PidSingleton, PidKeyMap, Subscribers}) ->
 			NewSingleton = maps:remove(Pid, PidSingleton),
 			%% Remove pid from tracking map
 			NewPidKeyMap = maps:remove(Pid, PidKeyMap),
-			{NewSingleton, NewPidKeyMap, Subscribers}
+			NewMonitorMap = maybe_demonitor_pid(Pid, MonitorMap),
+			{NewSingleton, NewPidKeyMap, Subscribers, NewMonitorMap}
 	end.
 
 %% @doc Notify all subscribers waiting for a key that has been registered
@@ -1330,12 +1364,9 @@ register_batch_entries([], State, _PrevState, Entries, _NewEntries, _FailedKeys)
 	%% All succeeded
 	{reply, {ok, lists:reverse(Entries)}, State};
 
-register_batch_entries([Reg | Rest], {PidSingleton, PidKeyMap, Subscribers} = State, PrevState, Entries, NewEntries, FailedKeys) ->
-	%% Parse registration tuple - can be {Key, Metadata} or {Key, Pid, Metadata}
-	{Key, Pid, Metadata} = case Reg of
-		{K, M} -> {K, self(), M};
-		{K, P, M} -> {K, P, M}
-	end,
+register_batch_entries([Reg | Rest], {PidSingleton, PidKeyMap, Subscribers, MonitorMap} = State, PrevState, Entries, NewEntries, FailedKeys) ->
+	%% Parse registration tuple - {Key, Pid, Metadata}
+	{Key, Pid, Metadata} = Reg,
 	
 	%% Try to register this entry
 	case ets:lookup(?REGISTRY_TABLE, Key) of
@@ -1343,26 +1374,27 @@ register_batch_entries([Reg | Rest], {PidSingleton, PidKeyMap, Subscribers} = St
 			case maps:get(Pid, PidSingleton, undefined) of
 				undefined ->
 					%% Key not registered, register it
-					case do_register_sync(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
+					case do_register_sync(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) of
 						{ok, Entry, NewState} ->
 							register_batch_entries(Rest, NewState, PrevState, [Entry | Entries], [Entry | NewEntries], FailedKeys);
 						{error, Reason} ->
 							%% Rollback: unregister all successful ones
-							rollback_batch(NewEntries, {PidSingleton, PidKeyMap, Subscribers}),
+							rollback_batch(NewEntries, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}, PrevState),
 							AllFailed = [Key | FailedKeys],
 							{reply, {error, {Reason, AllFailed, Entries}}, PrevState}
 					end;
 				ExistingKey when ExistingKey =:= Key ->
-					case do_register_sync(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
+					case do_register_sync(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) of
 						{ok, Entry, NewState} ->
 							register_batch_entries(Rest, NewState, PrevState, [Entry | Entries], [Entry | NewEntries], FailedKeys);
 						{error, Reason} ->
-							rollback_batch(NewEntries, {PidSingleton, PidKeyMap, Subscribers}),
+							rollback_batch(NewEntries, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}, PrevState),
 							AllFailed = [Key | FailedKeys],
 							{reply, {error, {Reason, AllFailed, Entries}}, PrevState}
 					end;
 				ExistingKey ->
 					AllFailed = [Key | FailedKeys],
+					rollback_batch(NewEntries, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}, PrevState),
 					{reply, {error, {{already_registered_under_key, ExistingKey}, AllFailed, Entries}}, PrevState}
 			end;
 		[{Key, ExistingPid, _} = Entry] ->
@@ -1378,7 +1410,7 @@ register_batch_entries([Reg | Rest], {PidSingleton, PidKeyMap, Subscribers} = St
 						{ok, Entry, NewState2} ->
 							register_batch_entries(Rest, NewState2, PrevState, [Entry | Entries], [Entry | NewEntries], FailedKeys);
 						{error, Reason} ->
-							rollback_batch(NewEntries, State),
+							rollback_batch(NewEntries, State, PrevState),
 							AllFailed = [Key | FailedKeys],
 							{reply, {error, {Reason, AllFailed, Entries}}, PrevState}
 					end
@@ -1386,9 +1418,63 @@ register_batch_entries([Reg | Rest], {PidSingleton, PidKeyMap, Subscribers} = St
 	end.
 
 %% Rollback registered entries
-rollback_batch(Entries, _State) ->
+rollback_batch(Entries, {_, _, _, MonitorMap}, {_, _, _, PrevMonitorMap}) ->
+	cleanup_new_monitors(MonitorMap, PrevMonitorMap),
 	lists:foreach(fun({Key, _Pid, _Meta}) ->
 		ets:delete(?REGISTRY_TABLE, Key),
 		ets:match_delete(?TAG_INDEX_TABLE, {'_', Key}),
 		ets:match_delete(?PROPERTY_INDEX_TABLE, {'_', Key})
 	end, Entries).
+
+register_batch_with_entries([], State, _PrevState, Entries, _NewEntries, _StartedPids, _FailedKeys) ->
+	{reply, {ok, lists:reverse(Entries)}, State};
+
+register_batch_with_entries([Reg | Rest], State, PrevState, Entries, NewEntries, StartedPids, FailedKeys) ->
+	{Key, Metadata, {M, F, A}} = Reg,
+	case ets:lookup(?REGISTRY_TABLE, Key) of
+		[{Key, ExistingPid, _} = Entry] ->
+			case is_process_alive(ExistingPid) of
+				true ->
+					register_batch_with_entries(Rest, State, PrevState, [Entry | Entries], NewEntries, StartedPids, FailedKeys);
+				false ->
+					NewState = remove_dead_pid_entries(ExistingPid, State),
+					start_and_register_batch(Key, Metadata, {M, F, A}, NewState, PrevState, Rest, Entries, NewEntries, StartedPids, FailedKeys)
+			end;
+		[] ->
+			start_and_register_batch(Key, Metadata, {M, F, A}, State, PrevState, Rest, Entries, NewEntries, StartedPids, FailedKeys)
+	end.
+
+start_and_register_batch(Key, Metadata, {M, F, A}, State, PrevState, Rest, Entries, NewEntries, StartedPids, FailedKeys) ->
+	try erlang:apply(M, F, A) of
+		{ok, Pid} ->
+			handle_started_batch(Key, Pid, Metadata, State, PrevState, Rest, Entries, NewEntries, [Pid | StartedPids], FailedKeys);
+		Pid when is_pid(Pid) ->
+			handle_started_batch(Key, Pid, Metadata, State, PrevState, Rest, Entries, NewEntries, [Pid | StartedPids], FailedKeys);
+		Other ->
+			rollback_batch(NewEntries, State, PrevState),
+			kill_started_pids(StartedPids),
+			AllFailed = [Key | FailedKeys],
+			{reply, {error, {invalid_return, Other, AllFailed, Entries}}, PrevState}
+	catch
+		Error:Reason ->
+			rollback_batch(NewEntries, State, PrevState),
+			kill_started_pids(StartedPids),
+			AllFailed = [Key | FailedKeys],
+			{reply, {error, {{Error, Reason}, AllFailed, Entries}}, PrevState}
+	end.
+
+handle_started_batch(Key, Pid, Metadata, State, PrevState, Rest, Entries, NewEntries, StartedPids, FailedKeys) ->
+	case do_register_sync(Key, Pid, Metadata, State) of
+		{ok, Entry, NewState} ->
+			register_batch_with_entries(Rest, NewState, PrevState, [Entry | Entries], [Entry | NewEntries], StartedPids, FailedKeys);
+		{error, Reason} ->
+			rollback_batch(NewEntries, State, PrevState),
+			kill_started_pids(StartedPids),
+			AllFailed = [Key | FailedKeys],
+			{reply, {error, {Reason, AllFailed, Entries}}, PrevState}
+	end.
+
+kill_started_pids(Pids) ->
+	lists:foreach(fun(Pid) ->
+		catch exit(Pid, kill)
+	end, Pids).

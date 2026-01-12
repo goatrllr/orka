@@ -8,10 +8,10 @@ When you batch register multiple services per user:
 
 ```erlang
 {ok, _Entries} = orca:register_batch([
-    {{global, portfolio, UserId}, Meta1},
-    {{global, technical, UserId}, Meta2},
-    {{global, orders, UserId}, Meta3},
-    {{global, risk, UserId}, Meta4}
+    {{global, portfolio, UserId}, PortfolioPid, Meta1},
+    {{global, technical, UserId}, TechnicalPid, Meta2},
+    {{global, orders, UserId}, OrdersPid, Meta3},
+    {{global, risk, UserId}, RiskPid, Meta4}
 ]),
 ```
 
@@ -25,19 +25,19 @@ Use a common tag for all user services, enabling prefix-like queries via tags.
 %% Registration
 register_user_services(UserId) ->
     {ok, _Entries} = orca:register_batch([
-        {{global, portfolio, UserId}, #{
+        {{global, portfolio, UserId}, PortfolioPid, #{
             tags => [UserId, portfolio, user_service],
             properties => #{user_id => UserId, service_type => portfolio}
         }},
-        {{global, technical, UserId}, #{
+        {{global, technical, UserId}, TechnicalPid, #{
             tags => [UserId, technical, user_service],
             properties => #{user_id => UserId, service_type => technical}
         }},
-        {{global, orders, UserId}, #{
+        {{global, orders, UserId}, OrdersPid, #{
             tags => [UserId, orders, user_service],
             properties => #{user_id => UserId, service_type => orders}
         }},
-        {{global, risk, UserId}, #{
+        {{global, risk, UserId}, RiskPid, #{
             tags => [UserId, risk, user_service],
             properties => #{user_id => UserId, service_type => risk}
         }}
@@ -110,10 +110,10 @@ register_user_workspace(UserId) ->
     
     %% Register all services for this user
     {ok, ServiceEntries} = orca:register_batch([
-        {{global, portfolio, UserId}, #{tags => [UserId]}},
-        {{global, technical, UserId}, #{tags => [UserId]}},
-        {{global, orders, UserId}, #{tags => [UserId]}},
-        {{global, risk, UserId}, #{tags => [UserId]}}
+        {{global, portfolio, UserId}, PortfolioPid, #{tags => [UserId]}},
+        {{global, technical, UserId}, TechnicalPid, #{tags => [UserId]}},
+        {{global, orders, UserId}, OrdersPid, #{tags => [UserId]}},
+        {{global, risk, UserId}, RiskPid, #{tags => [UserId]}}
     ]),
     
     %% Extract Pids from entries
@@ -249,7 +249,7 @@ Use properties with `find_by_property/3` for multi-dimensional queries.
 ```erlang
 register_user_services(UserId) ->
     {ok, Entries} = orca:register_batch([
-        {{global, portfolio, UserId}, #{
+        {{global, portfolio, UserId}, PortfolioPid, #{
             tags => [user_service],
             properties => #{
                 user_id => UserId,
@@ -257,7 +257,7 @@ register_user_services(UserId) ->
                 status => active
             }
         }},
-        {{global, technical, UserId}, #{
+        {{global, technical, UserId}, TechnicalPid, #{
             tags => [user_service],
             properties => #{
                 user_id => UserId,
@@ -265,7 +265,7 @@ register_user_services(UserId) ->
                 status => active
             }
         }},
-        {{global, orders, UserId}, #{
+        {{global, orders, UserId}, OrdersPid, #{
             tags => [user_service],
             properties => #{
                 user_id => UserId,
@@ -273,7 +273,7 @@ register_user_services(UserId) ->
                 status => active
             }
         }},
-        {{global, risk, UserId}, #{
+        {{global, risk, UserId}, RiskPid, #{
             tags => [user_service],
             properties => #{
                 user_id => UserId,
@@ -344,23 +344,23 @@ user_service_count(UserId) ->
 %% Register all trading services for a user
 create_workspace(UserId) ->
     {ok, Entries} = orca:register_batch([
-        {{global, portfolio, UserId}, #{
+        {{global, portfolio, UserId}, PortfolioPid, #{
             tags => [UserId, portfolio, trading],
             properties => #{service_type => portfolio}
         }},
-        {{global, technical, UserId}, #{
+        {{global, technical, UserId}, TechnicalPid, #{
             tags => [UserId, technical, trading],
             properties => #{service_type => technical}
         }},
-        {{global, fundamental, UserId}, #{
+        {{global, fundamental, UserId}, FundamentalPid, #{
             tags => [UserId, fundamental, trading],
             properties => #{service_type => fundamental}
         }},
-        {{global, orders, UserId}, #{
+        {{global, orders, UserId}, OrdersPid, #{
             tags => [UserId, orders, trading],
             properties => #{service_type => orders}
         }},
-        {{global, risk, UserId}, #{
+        {{global, risk, UserId}, RiskPid, #{
             tags => [UserId, risk, trading],
             properties => #{service_type => risk}
         }}
