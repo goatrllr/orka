@@ -285,30 +285,30 @@ register_user_services(UserId) ->
 
 %% Queries
 
-%% Get all services for user
+%% Get all services for user (by property)
 all_services_for_user(UserId) ->
-    orca:find_by_property(user_service, user_id, UserId).
+    orca:find_by_property(user_id, UserId).
 
 %% Get active services for user
 active_services_for_user(UserId) ->
-    AllServices = orca:find_by_property(user_service, user_id, UserId),
+    AllServices = orca:find_by_property(user_id, UserId),
     [Pid || {_Key, Pid, Meta} <- AllServices,
             maps:get(status, maps:get(properties, Meta, #{}), undefined) =:= active].
 
 %% Get specific service type for user
 portfolio_for_user(UserId) ->
-    AllUserServices = orca:find_by_property(user_service, user_id, UserId),
+    AllUserServices = orca:find_by_property(user_id, UserId),
     [Pid || {_Key, Pid, Meta} <- AllUserServices,
             maps:get(service_type, maps:get(properties, Meta, #{})) =:= portfolio].
 
 %% Get all users (unique user_ids from property index)
 all_users() ->
-    Stats = orca:property_stats(user_id, user_service),
+    Stats = orca:property_stats(service, user_id),
     maps:keys(Stats).
 
 %% Get user service count
 user_service_count(UserId) ->
-    Services = orca:find_by_property(user_service, user_id, UserId),
+    Services = orca:find_by_property(user_id, UserId),
     length(Services).
 ```
 

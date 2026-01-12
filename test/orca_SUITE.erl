@@ -13,6 +13,7 @@
 	test_lookup_not_found/1,
 	test_unregister/1,
 	test_unregister_not_found/1,
+	test_batch_unregister/1,
 	test_lookup_all/1,
 	test_process_cleanup_on_exit/1,
 	test_multiple_services_per_user/1,
@@ -76,6 +77,7 @@ all() ->
 		test_lookup_not_found,
 		test_unregister,
 		test_unregister_not_found,
+		test_batch_unregister,
 		test_lookup_all,
 		test_process_cleanup_on_exit,
 		test_multiple_services_per_user,
@@ -230,6 +232,27 @@ test_unregister_not_found(Config) ->
 	not_found = orca:unregister(Key),
 
 	ct:log("✓ Unregister returns not_found for missing key"),
+	Config.
+
+%% @doc Test batch unregistration
+test_batch_unregister(Config) ->
+	Key1 = {global, user_batch, service_a},
+	Key2 = {global, user_batch, service_b},
+	Key3 = {global, user_batch, service_missing},
+	Pid1 = spawn(fun() -> timer:sleep(10000) end),
+	Pid2 = spawn(fun() -> timer:sleep(10000) end),
+
+	{ok, _} = orca:register(Key1, Pid1, #{batch => true}),
+	{ok, _} = orca:register(Key2, Pid2, #{batch => true}),
+
+	{ok, {RemovedKeys, NotFoundKeys}} = orca:batch_unregister([Key1, Key2, Key3]),
+	[Key1, Key2] = RemovedKeys,
+	[Key3] = NotFoundKeys,
+
+	not_found = orca:lookup(Key1),
+	not_found = orca:lookup(Key2),
+
+	ct:log("✓ Batch unregister removes existing keys and reports missing keys"),
 	Config.
 
 %% @doc Test lookup_all returns all entries

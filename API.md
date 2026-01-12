@@ -329,6 +329,48 @@ not_found = orca:unregister({global, service, nonexistent}).
 
 ---
 
+#### `batch_unregister(Keys) -> {ok, {RemovedKeys, NotFoundKeys}} | {error, badarg}`
+
+Remove multiple entries in a single call. All keys are processed independently; success/failure of one key doesn't affect others.
+
+```erlang
+%% Clean up all services for a user
+UserId = user_123,
+Keys = [
+    {global, service, translator_1},
+    {global, service, cache_1},
+    {global, service, missing_1}  %% This key doesn't exist
+],
+{ok, {RemovedKeys, NotFoundKeys}} = orca:batch_unregister(Keys).
+
+%% RemovedKeys = [{global, service, translator_1}, {global, service, cache_1}]
+%% NotFoundKeys = [{global, service, missing_1}]
+```
+
+**Benefits**:
+- Single GenServer call instead of one per key (better performance for bulk cleanup)
+- Works with entries registered any way (individual register, batch, etc.)
+- Clear reporting of what was removed vs not found
+- Automatic cleanup: all associated tags and properties removed
+
+**Use cases**:
+- Cleaning up all services for a user/workspace that's shutting down
+- Removing batch-registered workloads
+- Bulk cleanup operations
+- Paired with `register_batch/1` for lifecycle management
+
+**Cleanup behavior**:
+- Removes entry from registry
+- Removes all tags for each removed entry
+- Removes all properties for each removed entry
+- Process monitors remain active (automatic cleanup happens when process crashes)
+
+**Comparison with individual unregister**:
+- `unregister/1`: Single key, returns `ok | not_found`
+- `batch_unregister/1`: Multiple keys, returns detailed breakdown of removed vs not found
+
+---
+
 ## Advanced Features
 
 ### Startup Coordination: Await & Subscribe

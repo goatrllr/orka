@@ -113,6 +113,7 @@ Including:
 | Properties | [API.md](../API.md) | [Property Examples](property_examples.md) |
 | Await/Subscribe | [API.md](../API.md) | [Await/Subscribe Examples](await_examples.md) |
 | Batch registration | [API.md](../API.md) | [Usage Patterns](usage_patterns.md) Pattern 4 |
+| Batch cleanup | [API.md](../API.md) | [Usage Patterns](usage_patterns.md) Pattern 8 |
 
 ## Testing
 

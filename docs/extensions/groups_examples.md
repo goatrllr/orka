@@ -70,11 +70,10 @@ Pids = process_group:members(workers),
 join(GroupName, Metadata) ->
     Key = {global, group, {GroupName, self()}},
     orca:register(Key, self(), maps:merge(
-        #{tags => [group_member]},
+        #{tags => [group_member],
+          properties => #{group => GroupName}},
         Metadata
-    )),
-    %% Register property for group-based querying
-    orca:register_property(Key, self(), group, GroupName).
+    )).
 
 %% Leave a group
 leave(GroupName, _Metadata) ->
@@ -83,18 +82,18 @@ leave(GroupName, _Metadata) ->
 
 %% Get all members of a group
 members(GroupName) ->
-    Entries = orca:find_by_property(group_member, group, GroupName),
+    Entries = orca:find_by_property(group, GroupName),
     [Pid || {_Key, Pid, _Meta} <- Entries].
 
 %% Get members with specific role
 members_with_role(GroupName, Role) ->
-    AllMembers = orca:find_by_property(group_member, group, GroupName),
+    AllMembers = orca:find_by_property(group, GroupName),
     [Pid || {_Key, Pid, Meta} <- AllMembers,
             maps:get(role, Meta, undefined) =:= Role].
 
 %% Get statistics on group
 group_stats(GroupName) ->
-    Entries = orca:find_by_property(group_member, group, GroupName),
+    Entries = orca:find_by_property(group, GroupName),
     #{
         size => length(Entries),
         members => [Pid || {_Key, Pid, _Meta} <- Entries],
@@ -175,10 +174,10 @@ delete_group(GroupName) ->
 join(GroupName, MemberKey, MemberMetadata) ->
     Key = {global, group_member, {GroupName, MemberKey}},
     orca:register(Key, self(), maps:merge(
-        #{tags => [GroupName, group_member]},
+        #{tags => [GroupName, group_member],
+          properties => #{group => GroupName}},
         MemberMetadata
-    )),
-    orca:register_property(Key, self(), group, GroupName).
+    )).
 
 %% Leave a group
 leave(GroupName, MemberKey) ->

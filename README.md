@@ -215,6 +215,7 @@ See **[docs/comparison.md](docs/comparison.md)** for detailed comparison.
 - `lookup/1` — Fast key lookup
 - `lookup_all/0` — Get all entries
 - `unregister/1` — Remove entry
+- `batch_unregister/1` — Remove multiple entries atomically
 
 ### Querying
 - `entries_by_type/1` — Find by key type
@@ -227,6 +228,8 @@ See **[docs/comparison.md](docs/comparison.md)** for detailed comparison.
 - `register_with/3` — Atomic startup + registration
 - `register_single/2,3` — Singleton constraint
 - `register_batch/1` — Batch atomic registration
+- `register_batch_with/1` — Start and batch register atomically
+- `batch_unregister/1` — Remove multiple entries atomically
 - `await/2` — Block on startup
 - `subscribe/1` — Non-blocking notification
 - `add_tag/2`, `remove_tag/2` — Dynamic metadata

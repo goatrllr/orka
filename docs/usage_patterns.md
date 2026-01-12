@@ -598,6 +598,31 @@ init([UserId]) ->
 - If some services are optional, use `subscribe` instead
 - If you need different error handling per service, handle individually
 
+**Cleanup**:
+
+When unregistering all services for a user/context, use `batch_unregister/1`:
+
+```erlang
+%% Clean up all services for a user when workspace closes
+UserId = user123,
+Keys = [
+    {global, portfolio, UserId},
+    {global, technical, UserId},
+    {global, fundamental, UserId},
+    {global, orders, UserId},
+    {global, risk, UserId}
+],
+{ok, {RemovedKeys, NotFoundKeys}} = orca:batch_unregister(Keys).
+
+%% RemovedKeys = [all keys that were removed]
+%% NotFoundKeys = [any keys that weren't registered]
+```
+
+Benefits over sequential unregister:
+- Single GenServer call instead of 5
+- Atomic operation on multiple keys
+- Clear reporting of what succeeded/failed
+
 ## Best Practices
 
 1. **Register early**: Don't wait for expensive initialization

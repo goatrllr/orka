@@ -8,7 +8,7 @@
 -export([register_batch_with/1]).
 -export([register_with/3]).
 -export([register_single/2, register_single/3]).
--export([unregister/1]).
+-export([unregister/1, batch_unregister/1]).
 -export([await/2, subscribe/1, unsubscribe/1]).
 -export([lookup/1]).
 -export([lookup_all/0]).
@@ -309,6 +309,12 @@ validate_batch_with_registrations(_Registrations) ->
 unregister(Key) ->
 	gen_server:call(?MODULE, {unregister, Key}).
 
+%% @doc Unregister multiple keys in a single call (no batch restrictions).
+batch_unregister(Keys) when is_list(Keys) ->
+	gen_server:call(?MODULE, {batch_unregister, Keys});
+batch_unregister(_Keys) ->
+	{error, badarg}.
+
 %% @doc Block and wait for a key to be registered with a timeout.
 %% 
 %% Waits for the specified key to be registered in the registry. If the key is already
@@ -573,9 +579,9 @@ entries_by_type(Type) ->
 %% ]
 entries_by_tag(Tag) ->
 	%% Get all keys with this tag from the index
-	Keys = ets:match_object(?TAG_INDEX_TABLE, {{tag, Tag}, '$1'}),
+	Keys = ets:select(?TAG_INDEX_TABLE, [{{{tag, Tag}, '$1'}, [], ['$1']}]),
 	%% Look up full entries for each key
-	lists:filtermap(fun({{tag, _}, Key}) ->
+	lists:filtermap(fun(Key) ->
 		case ets:lookup(?REGISTRY_TABLE, Key) of
 			[Entry] -> {true, Entry};
 			[] -> false  %% Key was deleted but tag index wasn't cleaned
@@ -893,48 +899,22 @@ handle_call({register_batch_with, Registrations}, _From, State) ->
 
 %% @doc Handle unregistration requests
 handle_call({unregister, Key}, _From, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
-	Result = case ets:lookup(?REGISTRY_TABLE, Key) of
-		[{Key, Pid, _}] ->
-			%% Remove from ETS
-			ets:delete(?REGISTRY_TABLE, Key),
-			
-			%% Remove all tags for this key from tag index
-			ets:match_delete(?TAG_INDEX_TABLE, {'_', Key}),
-			
-			%% Remove all properties for this key from property index
-			ets:match_delete(?PROPERTY_INDEX_TABLE, {'_', Key}),
-			
-			%% Update pid->keys mapping
-			NewKeyMap = maps:update_with(Pid, 
-				fun(Keys) -> lists:delete(Key, Keys) end, 
-				[], 
-				PidKeyMap),
-			
-			%% Remove from singleton map only if this is the singleton key
-			NewSingleton = case maps:get(Pid, PidSingleton, undefined) of
-				Key -> maps:remove(Pid, PidSingleton);
-				_ -> PidSingleton
-			end,
-			
-			%% If no more keys for this pid, demonitor
-			FinalMap = case maps:get(Pid, NewKeyMap, []) of
-				[] -> maps:remove(Pid, NewKeyMap);
-				_ -> NewKeyMap
-			end,
-			FinalMonitors = case maps:is_key(Pid, FinalMap) of
-				true -> MonitorMap;
-				false -> maybe_demonitor_pid(Pid, MonitorMap)
-			end,
-			
-			{ok, {NewSingleton, FinalMap, Subscribers, FinalMonitors}};
-		[] ->
-			{not_found, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
-	end,
-	
-	case Result of
+	case do_unregister(Key, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) of
 		{ok, UpdatedState} -> {reply, ok, UpdatedState};
 		{not_found, _} -> {reply, not_found, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 	end;
+
+%% @doc Handle batch unregistration requests
+handle_call({batch_unregister, Keys}, _From, State) ->
+	{FinalState, RemovedKeys, NotFoundKeys} = lists:foldl(fun(Key, {AccState, RemovedAcc, NotFoundAcc}) ->
+		case do_unregister(Key, AccState) of
+			{ok, UpdatedState} ->
+				{UpdatedState, [Key | RemovedAcc], NotFoundAcc};
+			{not_found, UpdatedState} ->
+				{UpdatedState, RemovedAcc, [Key | NotFoundAcc]}
+		end
+	end, {State, [], []}, Keys),
+	{reply, {ok, {lists:reverse(RemovedKeys), lists:reverse(NotFoundKeys)}}, FinalState};
 
 %% @doc Handle adding a tag
 handle_call({add_tag, Key, Tag}, _From, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
@@ -1199,6 +1179,40 @@ do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMa
     NewSubscribers = notify_subscribers(Key, Entry, Subscribers),
     
     {reply, {ok, Entry}, {PidSingleton, NewPidKeyMap, NewSubscribers, NewMonitorMap}}.
+
+%% @doc Remove a single key from registry and update state (internal helper)
+do_unregister(Key, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
+	case ets:lookup(?REGISTRY_TABLE, Key) of
+		[{Key, Pid, _}] ->
+			%% Remove from ETS
+			ets:delete(?REGISTRY_TABLE, Key),
+			%% Remove all tags for this key from tag index
+			ets:match_delete(?TAG_INDEX_TABLE, {'_', Key}),
+			%% Remove all properties for this key from property index
+			ets:match_delete(?PROPERTY_INDEX_TABLE, {'_', Key}),
+			%% Update pid->keys mapping
+			NewKeyMap = maps:update_with(Pid,
+				fun(Keys) -> lists:delete(Key, Keys) end,
+				[],
+				PidKeyMap),
+			%% Remove from singleton map only if this is the singleton key
+			NewSingleton = case maps:get(Pid, PidSingleton, undefined) of
+				Key -> maps:remove(Pid, PidSingleton);
+				_ -> PidSingleton
+			end,
+			%% If no more keys for this pid, demonitor
+			FinalMap = case maps:get(Pid, NewKeyMap, []) of
+				[] -> maps:remove(Pid, NewKeyMap);
+				_ -> NewKeyMap
+			end,
+			FinalMonitors = case maps:is_key(Pid, FinalMap) of
+				true -> MonitorMap;
+				false -> maybe_demonitor_pid(Pid, MonitorMap)
+			end,
+			{ok, {NewSingleton, FinalMap, Subscribers, FinalMonitors}};
+		[] ->
+			{not_found, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
+	end.
 
 register_with_start(Key, Metadata, M, F, A, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	%% Try to start the process
