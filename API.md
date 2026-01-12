@@ -59,7 +59,7 @@ We recommend the 3-tuple key structure for clarity and consistency:
 
 ```erlang
 #{
-    tags => [atom1, atom2, ...],           %% Categories for querying
+    tags => [atom1, atom2, ...],           %% Categories for querying (duplicates removed)
     properties => #{                        %% Custom structured data
         version => "1.0.0",
         capacity => 100,
@@ -106,7 +106,7 @@ Register a specific process (useful in supervisors).
 - If key already registered with live process: returns existing entry
 - If key registered but process dead: cleans up and re-registers
 
-#### `register_with(Key, Metadata, {M, F, A}) -> {ok, Pid} | error`
+#### `register_with(Key, Metadata, {M, F, A}) -> {ok, Pid} | {ok, Entry} | error`
 
 Atomically start a process and register it. Ensures no race conditions between startup and registration.
 
@@ -118,6 +118,7 @@ Atomically start a process and register it. Ensures no race conditions between s
     {translator_server, start_link, []}
 ).
 
+%% If the key is already registered, returns the existing entry
 %% If registration fails, process is automatically terminated
 ```
 
@@ -174,11 +175,11 @@ Register with singleton constraint: **one key per Pid**. A process can only be r
         Metadata
     ).
 
-%% Re-registering under same key is idempotent
+%% Re-registering under same key returns the existing entry (metadata unchanged)
 {ok, Entry} = orca:register_single(
     {global, service, config_server},
     ConfigPid,
-    NewMetadata
+    Metadata
 ).
 ```
 
@@ -395,7 +396,7 @@ Add a tag to an existing entry.
 
 ```erlang
 ok = orca:add_tag({global, service, translator}, critical),
-{error, tag_already_exists} = orca:add_tag({global, service, translator}, critical).
+ok = orca:add_tag({global, service, translator}, critical).
 ```
 
 #### `remove_tag(Key, Tag) -> ok | error`
@@ -853,4 +854,3 @@ The following detailed guides and examples are in the `docs/` directory:
 - **[Property Examples](docs/property_examples.md)** — Rich querying with properties
 - **[Await/Subscribe Examples](docs/await_examples.md)** — Startup coordination deep-dive
 - **[Comparison with Alternatives](docs/comparison.md)** — gproc vs syn vs orca
-

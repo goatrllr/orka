@@ -124,8 +124,10 @@ register(Key, Metadata) ->
 
 %% @doc Register a process with a key, specific Pid, and metadata.
 %% Supports supervisor registration of child processes.
-register(Key, Pid, Metadata) when is_pid(Pid) ->
-	gen_server:call(?MODULE, {register, Key, Pid, Metadata}).
+register(Key, Pid, Metadata) when is_pid(Pid), is_map(Metadata) ->
+	gen_server:call(?MODULE, {register, Key, Pid, Metadata});
+register(_Key, _Pid, _Metadata) ->
+	{error, badarg}.
 
 %% @doc Start a process using {Module, Function, Arguments} and register it atomically.
 %% 
@@ -145,6 +147,7 @@ register(Key, Pid, Metadata) when is_pid(Pid) ->
 %%
 %% Returns:
 %% {ok, Pid} - Process started and registered successfully
+%% {ok, {Key, Pid, Metadata}} - Key already registered; existing entry returned
 %% {error, Reason} - MFA application failed or registration failed
 %%
 %% Examples:
@@ -178,12 +181,14 @@ register(Key, Pid, Metadata) when is_pid(Pid) ->
 %% - Supervisor dynamic child specifications
 %% - Ensures process registration always succeeds if process starts
 %% - Automatic cleanup: if registration fails, process is terminated
-register_with(Key, Metadata, {M, F, A}) ->
-	gen_server:call(?MODULE, {register_with, Key, Metadata, M, F, A}).
+register_with(Key, Metadata, {M, F, A}) when is_map(Metadata) ->
+	gen_server:call(?MODULE, {register_with, Key, Metadata, M, F, A});
+register_with(_Key, _Metadata, _MFA) ->
+	{error, badarg}.
 
 %% @doc Register a process with singleton constraint (one key per Pid).
 %% The process can only be registered under one key at a time.
-%% If already registered under a different key, returns {error, already_registered_under_key}.
+%% If already registered, returns the existing entry.
 %%
 %% Metadata structure:
 %% #{
@@ -193,8 +198,7 @@ register_with(Key, Metadata, {M, F, A}) ->
 %% }
 %%
 %% Returns:
-%% {ok, {Key, Pid, Metadata}} - Registered successfully as singleton
-%% {error, {already_registered_under_key, ExistingKey}} - Pid already registered elsewhere
+%% {ok, {Key, Pid, Metadata}} - Registered successfully as singleton (or existing entry returned)
 %%
 %% Use cases:
 %% - Unique service instances (only one translator service per node)
@@ -212,7 +216,7 @@ register_with(Key, Metadata, {M, F, A}) ->
 %%       properties => #{reload_interval => 30000}}
 %% ).
 %%
-%% %% Attempting to register same process under different key fails
+%% %% Attempting to register same process under different key returns an error
 %% orca:register_single(
 %%     {global, service, app_config},
 %%     ConfigPid,
@@ -223,8 +227,10 @@ register_single(Key, Metadata) ->
 	register_single(Key, self(), Metadata).
 
 %% @doc Register a process with singleton constraint and explicit Pid.
-register_single(Key, Pid, Metadata) when is_pid(Pid) ->
-	gen_server:call(?MODULE, {register_single, Key, Pid, Metadata}).
+register_single(Key, Pid, Metadata) when is_pid(Pid), is_map(Metadata) ->
+	gen_server:call(?MODULE, {register_single, Key, Pid, Metadata});
+register_single(_Key, _Pid, _Metadata) ->
+	{error, badarg}.
 
 %% @doc Register multiple processes in a single atomic batch call.
 %%
@@ -261,7 +267,25 @@ register_single(Key, Pid, Metadata) when is_pid(Pid) ->
 %%         {{global, worker, job3}, WorkerPid3, #{tags => [worker, job]}}
 %%     ]).
 register_batch(Registrations) ->
-	gen_server:call(?MODULE, {register_batch, Registrations}).
+	case validate_batch_registrations(Registrations) of
+		ok -> gen_server:call(?MODULE, {register_batch, Registrations});
+		error -> {error, badarg}
+	end.
+
+validate_batch_registrations(Registrations) when is_list(Registrations) ->
+	case lists:all(fun
+		({_Key, Metadata}) when is_map(Metadata) ->
+			true;
+		({_Key, Pid, Metadata}) when is_pid(Pid), is_map(Metadata) ->
+			true;
+		(_) ->
+			false
+	end, Registrations) of
+		true -> ok;
+		false -> error
+	end;
+validate_batch_registrations(_Registrations) ->
+	error.
 
 %% @doc Unregister a process from the registry by key.
 unregister(Key) ->
@@ -373,7 +397,7 @@ lookup_all() ->
 	ets:tab2list(?REGISTRY_TABLE).
 
 %% @doc Add a tag to a registered process.
-%% Returns ok if tag was added, {error, tag_already_exists} if already present, not_found if key not registered.
+%% Returns ok if tag was added or already present, not_found if key not registered.
 add_tag(Key, Tag) ->
 	gen_server:call(?MODULE, {add_tag, Key, Tag}).
 
@@ -384,8 +408,10 @@ remove_tag(Key, Tag) ->
 
 %% @doc Update metadata for a registered process (preserves existing tags).
 %% Returns ok if updated, not_found if key not registered.
-update_metadata(Key, NewMetadata) ->
-	gen_server:call(?MODULE, {update_metadata, Key, NewMetadata}).
+update_metadata(Key, NewMetadata) when is_map(NewMetadata) ->
+	gen_server:call(?MODULE, {update_metadata, Key, NewMetadata});
+update_metadata(_Key, _NewMetadata) ->
+	{error, badarg}.
 
 %% @doc Find all entries by type (second element of key tuple).
 %% Key format: {Scope, Type, Name}
@@ -656,8 +682,10 @@ count_by_tag(Tag) ->
 %%     #{property => config, value => #{timeout => 5000, retries => 3}}).
 %% orca:register_property({global, service, worker_pool}, PoolPid,
 %%     #{property => capabilities, value => [image_resize, compression, filtering]}).
-register_property(Key, Pid, #{property := PropName, value := PropValue}) ->
-	gen_server:call(?MODULE, {register_property, Key, Pid, PropName, PropValue}).
+register_property(Key, Pid, #{property := PropName, value := PropValue}) when is_pid(Pid) ->
+	gen_server:call(?MODULE, {register_property, Key, Pid, PropName, PropValue});
+register_property(_Key, _Pid, _Property) ->
+	{error, badarg}.
 
 %% @doc Find all entries with a specific property value.
 %% Returns entries where the property matches the given value.
@@ -806,22 +834,31 @@ init([]) ->
 
 %% @doc Handle registration requests
 handle_call({register, Key, Pid, Metadata}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
-    case ets:lookup(?REGISTRY_TABLE, Key) of
-		%% Key not registered yet, proceed with registration
-		[] ->
-            do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers});
-		%% If this key was previously registered, check if the process is alive
-		[{Key, ExistingPid, _ExistingMetadata} = Entry] ->
-			case is_process_alive(ExistingPid) of
-                true ->
-                    %% Process is alive, return the existing registration
-                    % {reply, {error, already_registered, Entry}, {PidSingleton, PidKeyMap, Subscribers}};
-					{reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers}};
-                false ->
-                    %% Process is dead but entry still in ETS, clean it up and re-register
-                    NewState = remove_dead_pid_entries(ExistingPid, {PidSingleton, PidKeyMap, Subscribers}),
-                    do_register(Key, Pid, Metadata, NewState)
-            end
+	case maps:get(Pid, PidSingleton, undefined) of
+		undefined ->
+			case ets:lookup(?REGISTRY_TABLE, Key) of
+				%% Key not registered yet, proceed with registration
+				[] ->
+					do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers});
+				%% If this key was previously registered, check if the process is alive
+				[{Key, ExistingPid, _ExistingMetadata} = Entry] ->
+					case is_process_alive(ExistingPid) of
+						true ->
+							%% Process is alive, return the existing registration
+							{reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers}};
+						false ->
+							%% Process is dead but entry still in ETS, clean it up and re-register
+							NewState = remove_dead_pid_entries(ExistingPid, {PidSingleton, PidKeyMap, Subscribers}),
+							do_register(Key, Pid, Metadata, NewState)
+					end
+			end;
+		ExistingKey when ExistingKey =:= Key ->
+			case ets:lookup(?REGISTRY_TABLE, Key) of
+				[Entry] -> {reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers}};
+				[] -> do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers})
+			end;
+		ExistingKey ->
+			{reply, {error, {already_registered_under_key, ExistingKey}}, {PidSingleton, PidKeyMap, Subscribers}}
 	end;
 
 %% @doc Handle batch registration - all or nothing
@@ -847,8 +884,11 @@ handle_call({unregister, Key}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
 				[], 
 				PidKeyMap),
 			
-			%% Remove from singleton map if present
-			NewSingleton = maps:remove(Pid, PidSingleton),
+			%% Remove from singleton map only if this is the singleton key
+			NewSingleton = case maps:get(Pid, PidSingleton, undefined) of
+				Key -> maps:remove(Pid, PidSingleton);
+				_ -> PidSingleton
+			end,
 			
 			%% If no more keys for this pid, demonitor
 			FinalMap = case maps:get(Pid, NewKeyMap, []) of
@@ -874,7 +914,8 @@ handle_call({add_tag, Key, Tag}, _From, {PidSingleton, PidKeyMap, Subscribers}) 
 			case lists:member(Tag, Tags) of
 				true ->
 					%% Tag already exists
-					{reply, {error, tag_already_exists}, {PidSingleton, PidKeyMap, Subscribers}};
+					% {reply, {error, tag_already_exists}, {PidSingleton, PidKeyMap, Subscribers}};
+					{reply, ok, {PidSingleton, PidKeyMap, Subscribers}};
 				false ->
 					%% Add tag to metadata
 					NewTags = [Tag | Tags],
@@ -916,8 +957,9 @@ handle_call({update_metadata, Key, NewMetadata}, _From, {PidSingleton, PidKeyMap
 		[{Key, Pid, OldMetadata}] ->
 			%% Preserve existing tags
 			Tags = maps:get(tags, OldMetadata, []),
-			UpdatedMetadata = maps:put(tags, Tags, NewMetadata),
+			UpdatedMetadata = normalize_tags(maps:put(tags, Tags, NewMetadata)),
 			ets:insert(?REGISTRY_TABLE, {Key, Pid, UpdatedMetadata}),
+			update_property_index(Key, UpdatedMetadata),
 			{reply, ok, {PidSingleton, PidKeyMap, Subscribers}};
 		[] ->
 			{reply, not_found, {PidSingleton, PidKeyMap, Subscribers}}
@@ -925,11 +967,13 @@ handle_call({update_metadata, Key, NewMetadata}, _From, {PidSingleton, PidKeyMap
 
 handle_call({register_property, Key, Pid, PropName, PropValue}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
 	case ets:lookup(?REGISTRY_TABLE, Key) of
-		[{Key, RegisteredPid, _Metadata}] when RegisteredPid =:= Pid ->
-			%% Key exists and Pid matches, add property to index
-			%% First remove any existing property with the same name
-			ets:match_delete(?PROPERTY_INDEX_TABLE, {{property, PropName, '_'}, Key}),
-			ets:insert(?PROPERTY_INDEX_TABLE, {{property, PropName, PropValue}, Key}),
+		[{Key, RegisteredPid, Metadata}] when RegisteredPid =:= Pid ->
+			%% Key exists and Pid matches, update metadata and index
+			Props0 = maps:get(properties, Metadata, #{}),
+			NewProps = maps:put(PropName, PropValue, Props0),
+			UpdatedMetadata = maps:put(properties, NewProps, Metadata),
+			ets:insert(?REGISTRY_TABLE, {Key, Pid, UpdatedMetadata}),
+			update_property_index(Key, UpdatedMetadata),
 			{reply, ok, {PidSingleton, PidKeyMap, Subscribers}};
 		[] ->
 			%% Key not found
@@ -940,42 +984,17 @@ handle_call({register_property, Key, Pid, PropName, PropValue}, _From, {PidSingl
 	end;
 
 handle_call({register_with, Key, Metadata, M, F, A}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
-	%% Try to start the process
-	try erlang:apply(M, F, A) of
-		{ok, Pid} ->
-			%% Process started successfully, now register it
-			case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
-				{reply, {ok, {Key, Pid, Metadata}}, UpdatedState} ->
-					{reply, {ok, Pid}, UpdatedState};
-				{reply, {error, Reason}, _} ->
-					%% Registration failed, terminate the process
-					exit(Pid, kill),
-					{reply, {error, {registration_failed, Reason}}, {PidSingleton, PidKeyMap, Subscribers}};
-				Error ->
-					%% Unexpected error, terminate the process
-					exit(Pid, kill),
-					{reply, {error, Error}, {PidSingleton, PidKeyMap, Subscribers}}
+	case ets:lookup(?REGISTRY_TABLE, Key) of
+		[{Key, ExistingPid, _ExistingMetadata} = Entry] ->
+			case is_process_alive(ExistingPid) of
+				true ->
+					{reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers}};
+				false ->
+					NewState = remove_dead_pid_entries(ExistingPid, {PidSingleton, PidKeyMap, Subscribers}),
+					register_with_start(Key, Metadata, M, F, A, NewState)
 			end;
-		Pid when is_pid(Pid) ->
-			%% Process started and returned Pid directly (not in {ok, Pid} tuple)
-			case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
-				{reply, {ok, {Key, Pid, Metadata}}, UpdatedState} ->
-					{reply, {ok, Pid}, UpdatedState};
-				{reply, {error, Reason}, _} ->
-					%% Registration failed, terminate the process
-					exit(Pid, kill),
-					{reply, {error, {registration_failed, Reason}}, {PidSingleton, PidKeyMap, Subscribers}};
-				Error ->
-					%% Unexpected error, terminate the process
-					exit(Pid, kill),
-					{reply, {error, Error}, {PidSingleton, PidKeyMap, Subscribers}}
-			end;
-		Other ->
-			%% MFA returned something unexpected
-			{reply, {error, {invalid_return, Other}}, {PidSingleton, PidKeyMap, Subscribers}}
-	catch
-		Error:Reason ->
-			{reply, {error, {Error, Reason}}, {PidSingleton, PidKeyMap, Subscribers}}
+		[] ->
+			register_with_start(Key, Metadata, M, F, A, {PidSingleton, PidKeyMap, Subscribers})
 	end;
 
 handle_call({register_single, Key, Pid, Metadata}, _From, {PidSingleton, PidKeyMap, Subscribers}) ->
@@ -986,14 +1005,17 @@ handle_call({register_single, Key, Pid, Metadata}, _From, {PidSingleton, PidKeyM
 			case maps:get(Pid, PidKeyMap, []) of
 				[] ->
 					%% Pid not registered, proceed with registration
-					case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
-						{reply, {ok, Entry}, {UpdatedSingleton, UpdatedKeyMap, UpdatedSubs}} ->
-							%% Add to singleton map
-							NewSingleton = maps:put(Pid, Key, UpdatedSingleton),
-							{reply, {ok, Entry}, {NewSingleton, UpdatedKeyMap, UpdatedSubs}};
-						Other ->
-							{reply, Other, {PidSingleton, PidKeyMap, Subscribers}}
-					end;
+						case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
+							{reply, Reply, {UpdatedSingleton, UpdatedKeyMap, UpdatedSubs}} ->
+								case Reply of
+									{ok, Entry} ->
+										%% Add to singleton map
+										NewSingleton = maps:put(Pid, Key, UpdatedSingleton),
+										{reply, {ok, Entry}, {NewSingleton, UpdatedKeyMap, UpdatedSubs}};
+									_ ->
+										{reply, Reply, {PidSingleton, PidKeyMap, Subscribers}}
+								end
+						end;
 				_ExistingKeys ->
 					%% Pid already has non-singleton registrations
 					{reply, {error, {already_registered, _ExistingKeys}}, {PidSingleton, PidKeyMap, Subscribers}}
@@ -1002,18 +1024,14 @@ handle_call({register_single, Key, Pid, Metadata}, _From, {PidSingleton, PidKeyM
 			%% Pid already registered as singleton
 			case ExistingKey =:= Key of
 				true ->
-					%% Re-registering under the same key - update metadata
-					ets:insert(?REGISTRY_TABLE, {Key, Pid, Metadata}),
-					%% Clear existing tags and add new ones
-					ets:match_delete(?TAG_INDEX_TABLE, {'_', Key}),
-					Tags = maps:get(tags, Metadata, []),
-					lists:foreach(fun(Tag) ->
-						ets:insert(?TAG_INDEX_TABLE, {{tag, Tag}, Key})
-					end, Tags),
-					UpdatedEntry = {Key, Pid, Metadata},
-					{reply, {ok, UpdatedEntry}, {PidSingleton, PidKeyMap, Subscribers}};
+					case ets:lookup(?REGISTRY_TABLE, ExistingKey) of
+						[Entry] ->
+							{reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers}};
+						[] ->
+							%% Stale singleton entry, allow re-registration under requested key
+							do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers})
+					end;
 				false ->
-					%% Trying to register under a different key
 					{reply, {error, {already_registered_under_key, ExistingKey}}, {PidSingleton, PidKeyMap, Subscribers}}
 			end
 	end;
@@ -1117,21 +1135,26 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @doc Perform the actual registration (fast path)
 do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) ->
-    %% Monitor the new pid
-    monitor(process, Pid),
+    %% Monitor the pid only if it's new to the registry
+    case maps:get(Pid, PidKeyMap, []) of
+        [] -> monitor(process, Pid);
+        _ -> ok
+    end,
 
     %% Insert new entry into ETS
-    Entry = {Key, Pid, Metadata},
+	NormalizedMetadata = normalize_tags(Metadata),
+    Entry = {Key, Pid, NormalizedMetadata},
     ets:insert(?REGISTRY_TABLE, Entry),
     
     %% Clear existing tags for this key from tag index
     ets:match_delete(?TAG_INDEX_TABLE, {'_', Key}),
     
     %% Add tags to tag index
-    Tags = maps:get(tags, Metadata, []),
+    Tags = maps:get(tags, NormalizedMetadata, []),
     lists:foreach(fun(Tag) ->
         ets:insert(?TAG_INDEX_TABLE, {{tag, Tag}, Key})
     end, Tags),
+	update_property_index(Key, NormalizedMetadata),
         
     %% Track pid -> keys mapping
     NewPidKeyMap = maps:update_with(Pid, 
@@ -1143,6 +1166,61 @@ do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) ->
     NewSubscribers = notify_subscribers(Key, Entry, Subscribers),
     
     {reply, {ok, Entry}, {PidSingleton, NewPidKeyMap, NewSubscribers}}.
+
+register_with_start(Key, Metadata, M, F, A, {PidSingleton, PidKeyMap, Subscribers}) ->
+	%% Try to start the process
+	try erlang:apply(M, F, A) of
+		{ok, Pid} ->
+			%% Process started successfully, now register it
+			maybe_do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers});
+			% case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
+			% 	{reply, {ok, {Key, Pid, Metadata}}, UpdatedState} ->
+			% 		{reply, {ok, Pid}, UpdatedState};
+			% 	{reply, {error, Reason}, _} ->
+			% 		%% Registration failed, terminate the process
+			% 		exit(Pid, kill),
+			% 		{reply, {error, {registration_failed, Reason}}, {PidSingleton, PidKeyMap, Subscribers}};
+			% 	Error ->
+			% 		%% Unexpected error, terminate the process
+			% 		exit(Pid, kill),
+			% 		{reply, {error, Error}, {PidSingleton, PidKeyMap, Subscribers}}
+			% end;
+		Pid when is_pid(Pid) ->
+			%% Process started and returned Pid directly (not in {ok, Pid} tuple)
+			maybe_do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers});
+			% case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
+			% 	{reply, {ok, {Key, Pid, Metadata}}, UpdatedState} ->
+			% 		{reply, {ok, Pid}, UpdatedState};
+			% 	{reply, {error, Reason}, _} ->
+			% 		%% Registration failed, terminate the process
+			% 		exit(Pid, kill),
+			% 		{reply, {error, {registration_failed, Reason}}, {PidSingleton, PidKeyMap, Subscribers}};
+			% 	Error ->
+			% 		%% Unexpected error, terminate the process
+			% 		exit(Pid, kill),
+			% 		{reply, {error, Error}, {PidSingleton, PidKeyMap, Subscribers}}
+			% end;
+		Other ->
+			%% MFA returned something unexpected
+			{reply, {error, {invalid_return, Other}}, {PidSingleton, PidKeyMap, Subscribers}}
+	catch
+		Error:Reason ->
+			{reply, {error, {Error, Reason}}, {PidSingleton, PidKeyMap, Subscribers}}
+	end.
+
+maybe_do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) ->
+	case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
+		{reply, {ok, {Key, Pid, Metadata}}, UpdatedState} ->
+			{reply, {ok, Pid}, UpdatedState};
+		{reply, {error, Reason}, _} ->
+			%% Registration failed, terminate the process
+			exit(Pid, kill),
+			{reply, {error, {registration_failed, Reason}}, {PidSingleton, PidKeyMap, Subscribers}};
+		Error ->
+			%% Unexpected error, terminate the process
+			exit(Pid, kill),
+			{reply, {error, Error}, {PidSingleton, PidKeyMap, Subscribers}}
+	end.
 
 %% Synchronous version of do_register for batch operations (doesn't return reply tuple)
 do_register_sync(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) ->
@@ -1157,17 +1235,19 @@ do_register_sync(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) ->
     end,
 
     %% Insert new entry into ETS
-    Entry = {Key, Pid, Metadata},
+	NormalizedMetadata = normalize_tags(Metadata),
+    Entry = {Key, Pid, NormalizedMetadata},
     ets:insert(?REGISTRY_TABLE, Entry),
     
     %% Clear existing tags for this key from tag index
     ets:match_delete(?TAG_INDEX_TABLE, {'_', Key}),
     
     %% Add tags to tag index
-    Tags = maps:get(tags, Metadata, []),
+    Tags = maps:get(tags, NormalizedMetadata, []),
     lists:foreach(fun(Tag) ->
         ets:insert(?TAG_INDEX_TABLE, {{tag, Tag}, Key})
     end, Tags),
+	update_property_index(Key, NormalizedMetadata),
         
     %% Track pid -> keys mapping
     NewPidKeyMap = maps:update_with(Pid, 
@@ -1179,6 +1259,27 @@ do_register_sync(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) ->
     NewSubscribers = notify_subscribers(Key, Entry, Subscribers),
     
     {ok, Entry, {PidSingleton, NewPidKeyMap, NewSubscribers}}.
+
+normalize_tags(Metadata) ->
+	case maps:get(tags, Metadata, undefined) of
+		undefined ->
+			Metadata;
+		Tags when is_list(Tags) ->
+			maps:put(tags, lists:usort(Tags), Metadata);
+		_ ->
+			Metadata
+	end.
+
+update_property_index(Key, Metadata) ->
+	ets:match_delete(?PROPERTY_INDEX_TABLE, {'_', Key}),
+	case maps:get(properties, Metadata, #{}) of
+		Props when is_map(Props) ->
+			maps:foreach(fun(PropName, PropValue) ->
+				ets:insert(?PROPERTY_INDEX_TABLE, {{property, PropName, PropValue}, Key})
+			end, Props);
+		_ ->
+			ok
+	end.
 
 remove_dead_pid_entries(Pid, {PidSingleton, PidKeyMap, Subscribers}) ->
 	%% Get all keys associated with this pid
@@ -1236,15 +1337,30 @@ register_batch_entries([Reg | Rest], {PidSingleton, PidKeyMap, Subscribers} = St
 	%% Try to register this entry
 	case ets:lookup(?REGISTRY_TABLE, Key) of
 		[] ->
-			%% Key not registered, register it
-			case do_register_sync(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
-				{ok, Entry, NewState} ->
-					register_batch_entries(Rest, NewState, PrevState, [Entry | Entries], [Entry | NewEntries], FailedKeys);
-				{error, Reason} ->
-					%% Rollback: unregister all successful ones
-					rollback_batch(NewEntries, {PidSingleton, PidKeyMap, Subscribers}),
+			case maps:get(Pid, PidSingleton, undefined) of
+				undefined ->
+					%% Key not registered, register it
+					case do_register_sync(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
+						{ok, Entry, NewState} ->
+							register_batch_entries(Rest, NewState, PrevState, [Entry | Entries], [Entry | NewEntries], FailedKeys);
+						{error, Reason} ->
+							%% Rollback: unregister all successful ones
+							rollback_batch(NewEntries, {PidSingleton, PidKeyMap, Subscribers}),
+							AllFailed = [Key | FailedKeys],
+							{reply, {error, {Reason, AllFailed, Entries}}, PrevState}
+					end;
+				ExistingKey when ExistingKey =:= Key ->
+					case do_register_sync(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers}) of
+						{ok, Entry, NewState} ->
+							register_batch_entries(Rest, NewState, PrevState, [Entry | Entries], [Entry | NewEntries], FailedKeys);
+						{error, Reason} ->
+							rollback_batch(NewEntries, {PidSingleton, PidKeyMap, Subscribers}),
+							AllFailed = [Key | FailedKeys],
+							{reply, {error, {Reason, AllFailed, Entries}}, PrevState}
+					end;
+				ExistingKey ->
 					AllFailed = [Key | FailedKeys],
-					{reply, {error, {Reason, AllFailed, Entries}}, PrevState}
+					{reply, {error, {{already_registered_under_key, ExistingKey}, AllFailed, Entries}}, PrevState}
 			end;
 		[{Key, ExistingPid, _} = Entry] ->
 			%% Key already exists, check if process is alive

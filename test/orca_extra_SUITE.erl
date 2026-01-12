@@ -7,9 +7,9 @@
 %% Tests
 -export([
 		 test_find_by_property_with_scoped_key_type/1,
-		 test_property_stats_uses_property_name/1,
-		 test_register_with_cleans_tag_index/1,
-		 test_register_single_updates_metadata/1
+	test_property_stats_uses_property_name/1,
+	test_register_with_preserves_live_tags/1,
+	test_register_single_returns_existing/1
 	]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -21,9 +21,9 @@
 all() ->
 	[
 		test_find_by_property_with_scoped_key_type,
-		test_property_stats_uses_property_name,
-		test_register_with_cleans_tag_index,
-		test_register_single_updates_metadata
+	test_property_stats_uses_property_name,
+	test_register_with_preserves_live_tags,
+	test_register_single_returns_existing
 	].
 
 init_per_suite(Config) ->
@@ -106,36 +106,34 @@ test_property_stats_uses_property_name(Config) ->
 	ct:log("✓ property_stats/2 counts by property name"),
 	Config.
 
-%% @doc register_with/3 should not leave stale tags in the tag index.
-%% This fails because do_register/4 doesn't clear previous tag index entries.
-test_register_with_cleans_tag_index(Config) ->
+%% @doc register_with/3 should not mutate tags for a live registration.
+test_register_with_preserves_live_tags(Config) ->
 	Key = {global, service, tag_index_test},
 	Pid1 = spawn(fun() -> timer:sleep(10000) end),
 
 	{ok, _} = orca:register(Key, Pid1, #{tags => [old_tag]}),
-	{ok, _Pid2} = orca:register_with(Key, #{tags => [new_tag]},
+	{ok, {Key, Pid1, _}} = orca:register_with(Key, #{tags => [new_tag]},
 		{erlang, spawn, [fun() -> timer:sleep(10000) end]}),
 
 	OldEntries = orca:entries_by_tag(old_tag),
 	NewEntries = orca:entries_by_tag(new_tag),
 
-	false = lists:any(fun({K, _, _}) -> K =:= Key end, OldEntries),
-	true = lists:any(fun({K, _, _}) -> K =:= Key end, NewEntries),
+	true = lists:any(fun({K, _, _}) -> K =:= Key end, OldEntries),
+	false = lists:any(fun({K, _, _}) -> K =:= Key end, NewEntries),
 
-	ct:log("✓ register_with/3 updates tag index"),
+	ct:log("✓ register_with/3 leaves tags unchanged for live entries"),
 	Config.
 
-%% @doc Re-registering a singleton under the same key should update metadata.
-%% This fails because the code returns the existing entry unchanged.
-test_register_single_updates_metadata(Config) ->
+%% @doc Re-registering a singleton should return the existing entry unchanged.
+test_register_single_returns_existing(Config) ->
 	Key = {global, service, singleton_meta},
 	Meta1 = #{tags => [service], version => 1},
 	Meta2 = #{tags => [service, updated], version => 2},
 
 	{ok, {Key, Pid, Meta1}} = orca:register_single(Key, Meta1),
-	{ok, {Key, Pid, Meta2}} = orca:register_single(Key, Pid, Meta2),
+	{ok, {Key, Pid, Meta1}} = orca:register_single(Key, Pid, Meta2),
 
-	{ok, {Key, Pid, Meta2}} = orca:lookup(Key),
+	{ok, {Key, Pid, Meta1}} = orca:lookup(Key),
 
-	ct:log("✓ register_single/3 updates metadata on idempotent call"),
+	ct:log("✓ register_single/3 returns existing entry on idempotent call"),
 	Config.

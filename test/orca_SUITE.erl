@@ -18,12 +18,17 @@
 	test_nested_keys/1,
 	test_re_register_same_key/1,
 	test_metadata_preservation/1,
+	test_add_tag_idempotent/1,
+	test_register_batch_invalid_input/1,
+	test_register_property_badarg/1,
+	test_update_metadata_badarg/1,
 	test_register_property/1,
 	test_find_by_property/1,
 	test_find_by_property_with_type/1,
 	test_count_by_property/1,
 	test_property_stats/1,
 	test_register_with/1,
+	test_register_with_existing_returns_entry/1,
 	test_register_with_failure/1,
 	test_register_single/1,
 	test_register_single_constraint/1,
@@ -59,12 +64,17 @@ all() ->
 		test_nested_keys,
 		test_re_register_same_key,
 		test_metadata_preservation,
+		test_add_tag_idempotent,
+		test_register_batch_invalid_input,
+		test_register_property_badarg,
+		test_update_metadata_badarg,
 		test_register_property,
 		test_find_by_property,
 		test_find_by_property_with_type,
 		test_count_by_property,
 		test_property_stats,
 		test_register_with,
+		test_register_with_existing_returns_entry,
 		test_register_with_failure,
 		test_register_single,
 		test_register_single_constraint,
@@ -313,6 +323,45 @@ test_metadata_preservation(Config) ->
 	ct:log("✓ Complex metadata types preserved correctly"),
 	Config.
 
+%% @doc Test add_tag/2 is idempotent and doesn't duplicate tags
+test_add_tag_idempotent(Config) ->
+	Key = {global, service, tag_idempotent},
+	Pid = spawn(fun() -> timer:sleep(10000) end),
+	Metadata = #{tags => [service]},
+
+	{ok, _} = orca:register(Key, Pid, Metadata),
+	ok = orca:add_tag(Key, critical),
+	ok = orca:add_tag(Key, critical),
+
+	{ok, {Key, _Pid, LookupMeta}} = orca:lookup(Key),
+	Tags = maps:get(tags, LookupMeta, []),
+	1 = length([Tag || Tag <- Tags, Tag =:= critical]),
+
+	Entries = orca:entries_by_tag(critical),
+	1 = length(Entries),
+
+	ct:log("✓ add_tag/2 is idempotent"),
+	Config.
+
+%% @doc Test register_batch/1 invalid input returns badarg
+test_register_batch_invalid_input(Config) ->
+	{error, badarg} = orca:register_batch([{invalid}]),
+	{error, badarg} = orca:register_batch([{global, service, bad}, not_a_map]),
+	{error, badarg} = orca:register_batch([{global, service, bad}, not_a_pid, #{}]),
+	Config.
+
+%% @doc Test register_property/3 invalid input returns badarg
+test_register_property_badarg(Config) ->
+	Key = {global, service, bad_property},
+	{error, badarg} = orca:register_property(Key, not_a_pid, #{property => region, value => "us-west"}),
+	Config.
+
+%% @doc Test update_metadata/2 invalid input returns badarg
+test_update_metadata_badarg(Config) ->
+	Key = {global, service, bad_metadata},
+	{error, badarg} = orca:update_metadata(Key, not_a_map),
+	Config.
+
 %% @doc Test property registration
 test_register_property(Config) ->
 	Key1 = {global, service, translator_1},
@@ -482,7 +531,8 @@ test_register_with(Config) ->
 	
 	%% Verify the process is registered
 	{ok, {Key, Pid, RetrievedMeta}} = orca:lookup(Key),
-	RetrievedMeta = Metadata,
+	NormalizedMeta = normalize_tags(Metadata),
+	NormalizedMeta = normalize_tags(RetrievedMeta),
 	
 	%% Verify the process is alive
 	true = is_process_alive(Pid),
@@ -492,6 +542,25 @@ test_register_with(Config) ->
 	true = lists:any(fun({K, P, _}) -> K =:= Key andalso P =:= Pid end, AllEntries),
 	
 	ct:log("✓ register_with/3 starts and registers process atomically"),
+	Config.
+
+%% @doc Test register_with/3 returns existing entry when already registered
+test_register_with_existing_returns_entry(Config) ->
+	Key = {global, service, existing_service},
+	Metadata = #{tags => [service, existing]},
+	Pid = spawn(fun() -> timer:sleep(10000) end),
+
+	{ok, {Key, Pid, _}} = orca:register(Key, Pid, Metadata),
+	{ok, {Key, Pid, EntryMeta}} =
+		orca:register_with(Key, #{tags => [service, ignored]}, {erlang, spawn, [fun() -> timer:sleep(10000) end]}),
+
+	NormalizedMeta = normalize_tags(Metadata),
+	NormalizedMeta = normalize_tags(EntryMeta),
+	{ok, {Key, Pid, LookupMeta}} = orca:lookup(Key),
+	NormalizedMeta = normalize_tags(Metadata),
+	NormalizedMeta = normalize_tags(LookupMeta),
+
+	ct:log("✓ register_with/3 returns existing entry for live registration"),
 	Config.
 
 %% @doc Test register_with/3 with MFA that returns {ok, Pid}
@@ -518,10 +587,14 @@ test_register_single(Config) ->
 	Metadata = #{tags => [service, config, critical], properties => #{reload_interval => 30000}},
 	
 	%% Register as singleton
-	{ok, {Key, Pid, Metadata}} = orca:register_single(Key, Metadata),
+	{ok, {Key, Pid, RegMetadata}} = orca:register_single(Key, Metadata),
+	NormalizedMeta = normalize_tags(Metadata),
+	NormalizedMeta = normalize_tags(RegMetadata),
 	
 	%% Verify it's registered
-	{ok, {Key, Pid, Metadata}} = orca:lookup(Key),
+	{ok, {Key, Pid, LookupMetadata}} = orca:lookup(Key),
+	NormalizedMeta = normalize_tags(Metadata),
+	NormalizedMeta = normalize_tags(LookupMetadata),
 	
 	%% Verify the process is alive
 	true = is_process_alive(Pid),
@@ -529,7 +602,7 @@ test_register_single(Config) ->
 	ct:log("✓ register_single/3 registers process with singleton constraint"),
 	Config.
 
-%% @doc Test register_single constraint - prevents multiple aliases
+%% @doc Test register_single constraint - errors on other keys
 test_register_single_constraint(Config) ->
 	Key1 = {global, service, lock_manager},
 	Key2 = {global, service, lock_manager_backup},
@@ -541,9 +614,8 @@ test_register_single_constraint(Config) ->
 	%% Verify it's registered
 	{ok, {Key1, Pid, _}} = orca:lookup(Key1),
 	
-	%% Try to register the same process under a different key - should fail
-	Result = orca:register_single(Key2, Pid, Metadata),
-	{error, {already_registered_under_key, Key1}} = Result,
+	%% Try to register the same process under a different key - should return error
+	{error, {already_registered_under_key, Key1}} = orca:register_single(Key2, Pid, Metadata),
 	
 	%% Verify the second key is not registered
 	not_found = orca:lookup(Key2),
@@ -551,7 +623,7 @@ test_register_single_constraint(Config) ->
 	%% Verify the first key still exists
 	{ok, {Key1, Pid, _}} = orca:lookup(Key1),
 	
-	ct:log("✓ register_single/3 enforces singleton constraint"),
+	ct:log("✓ register_single/3 errors for singleton Pid under another key"),
 	Config.
 
 %% @doc Test await when key is already registered
@@ -560,11 +632,15 @@ test_await_already_registered(Config) ->
 	Metadata = #{tags => [service, database, critical]},
 	
 	%% Register the key first
-	{ok, {Key, Pid, Metadata}} = orca:register(Key, Metadata),
+	{ok, {Key, Pid, RegMetadata}} = orca:register(Key, Metadata),
+	NormalizedMeta = normalize_tags(Metadata),
+	NormalizedMeta = normalize_tags(RegMetadata),
 	
 	%% Now await should return immediately
 	Start = erlang:monotonic_time(millisecond),
-	{ok, {Key, Pid, Metadata}} = orca:await(Key, 30000),
+	{ok, {Key, Pid, AwaitMetadata}} = orca:await(Key, 30000),
+	NormalizedMeta = normalize_tags(Metadata),
+	NormalizedMeta = normalize_tags(AwaitMetadata),
 	Elapsed = erlang:monotonic_time(millisecond) - Start,
 	
 	%% Should be nearly instant (less than 500ms)
@@ -607,10 +683,14 @@ test_await_registration(Config) ->
 	timer:sleep(100),
 	
 	%% Now register the key
-	{ok, {Key, RegisteredPid, Metadata}} = orca:register(Key, Metadata),
+	{ok, {Key, RegisteredPid, RegMetadata}} = orca:register(Key, Metadata),
+	NormalizedMeta = normalize_tags(Metadata),
+	NormalizedMeta = normalize_tags(RegMetadata),
 	
 	%% Wait for result from AwaitPid
-	{await_result, {ok, {Key, RegisteredPid, Metadata}}} = receive_timeout(2000),
+	{await_result, {ok, {Key, RegisteredPid, AwaitMetadata}}} = receive_timeout(2000),
+	NormalizedMeta = normalize_tags(Metadata),
+	NormalizedMeta = normalize_tags(AwaitMetadata),
 	
 	%% Verify AwaitPid is still alive
 	demonitor(MonitorRef, [flush]),
@@ -624,13 +704,17 @@ test_subscribe_already_registered(Config) ->
 	Metadata = #{tags => [service, config, critical]},
 	
 	%% Register the key first
-	{ok, {Key, Pid, Metadata}} = orca:register(Key, Metadata),
+	{ok, {Key, Pid, RegMetadata}} = orca:register(Key, Metadata),
+	NormalizedMeta = normalize_tags(Metadata),
+	NormalizedMeta = normalize_tags(RegMetadata),
 	
 	%% Subscribe should send notification immediately
 	ok = orca:subscribe(Key),
 	
 	%% Should receive message immediately
-	{orca_registered, Key, {Key, Pid, Metadata}} = receive_timeout(500),
+	{orca_registered, Key, {Key, Pid, SubMetadata}} = receive_timeout(500),
+	NormalizedMeta = normalize_tags(Metadata),
+	NormalizedMeta = normalize_tags(SubMetadata),
 	
 	ct:log("✓ subscribe/1 sends immediate notification for already registered key"),
 	Config.
@@ -656,7 +740,9 @@ test_subscribe_and_registration(Config) ->
 	MonitorRef = monitor(process, RegisterPid),
 	
 	%% Wait for notification - should be registered by the spawned RegisterPid
-	{orca_registered, Key, {Key, RegisterPid, Metadata}} = receive_timeout(2000),
+	{orca_registered, Key, {Key, RegisterPid, SubMetadata}} = receive_timeout(2000),
+	NormalizedMeta = normalize_tags(Metadata),
+	NormalizedMeta = normalize_tags(SubMetadata),
 	
 	%% Verify the spawned process completed without crashing
 	demonitor(MonitorRef, [flush]),
@@ -676,7 +762,9 @@ test_unsubscribe(Config) ->
 	ok = orca:unsubscribe(Key),
 	
 	%% Register the key - should NOT receive notification
-	{ok, {Key, _Pid, Metadata}} = orca:register(Key, Metadata),
+	{ok, {Key, _Pid, RegMetadata}} = orca:register(Key, Metadata),
+	NormalizedMeta = normalize_tags(Metadata),
+	NormalizedMeta = normalize_tags(RegMetadata),
 	
 	%% Try to receive message (should timeout)
 	timeout = receive_timeout(200),
@@ -833,6 +921,13 @@ receive_timeout(Timeout) ->
 	receive
 		Msg -> Msg
 	after Timeout -> timeout
+	end.
+
+normalize_tags(Metadata) ->
+	case maps:get(tags, Metadata, undefined) of
+		undefined -> Metadata;
+		Tags when is_list(Tags) -> maps:put(tags, lists:usort(Tags), Metadata);
+		_ -> Metadata
 	end.
 
 wait_for_pids([], _Timeout) -> ok;

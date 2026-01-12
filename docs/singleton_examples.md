@@ -6,6 +6,7 @@ The Orca process registry supports singleton registration through `register_sing
 
 - **Singleton Constraint**: A process registered with `register_single` can only have one registration key at a time
 - **Safety**: Attempting to register the same process under a different key returns an error
+- **Idempotent**: Re-registering under the same key returns the existing entry (metadata unchanged)
 - **Cleanup**: The singleton constraint is automatically released when the process crashes or is unregistered
 - **Contrast to `register/3`**: Regular `register/3` allows the same process to have multiple keys (aliases)
 
@@ -21,6 +22,7 @@ orca:register_single(Key, Pid, Metadata).
 
 Returns:
 - `{ok, {Key, Pid, Metadata}}` — Successfully registered as singleton
+- `{ok, {Key, Pid, Metadata}}` — Already registered under the same key (existing entry returned)
 - `{error, {already_registered_under_key, ExistingKey}}` — Pid already registered under a different key
 - `{error, {already_registered, ExistingKeys}}` — Pid already has non-singleton registrations
 - `not_found` — Key not registered (for unregister operations)
