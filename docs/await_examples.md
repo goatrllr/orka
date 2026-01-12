@@ -16,6 +16,8 @@ Orca provides two patterns for handling dependent services:
    - Receives message when key is registered
    - Suitable for graceful degradation and optional features
 
+Note about `await/2` timeouts: `await/2` subscribes and sets a timer that will send a `{orca_await_timeout, Key}` message to the waiting process on expiry. The implementation calls `unsubscribe/1` and drains the timeout message to avoid stale notifications. There is a small race window where a registration and the timeout may arrive concurrently; callers should handle both `{orca_registered, ...}` and timeout responses, or prefer `subscribe/1` for non-blocking semantics when exact ordering matters.
+
 ## 1. Blocking Initialization Pattern
 
 **Use Case**: A service requires another service to be available before it can start.

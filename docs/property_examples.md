@@ -28,6 +28,8 @@ orca:count_by_property(PropertyName, PropertyValue).
 orca:property_stats(Type, PropertyName).
 ```
 
+Note: property lookups match values by exact Erlang term equality. For example, lists, maps, and tuples must match exactly the stored term to be found. Use `find_by_property(Type, PropertyName, Value)` when you need to restrict the search to a specific key `Type` (the second element of the `{Scope, Type, Name}` key tuple). If you need more flexible matching (partial matches, ranges, or fuzzy comparisons), perform client-side filtering after retrieving candidates from the index.
+
 ---
 
 ## Use Case 1: Load Balancing with Capacity

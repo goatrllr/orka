@@ -25,6 +25,9 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
+-include_lib("stdlib/include/ms_transform.hrl").
+-compile({parse_transform, ms_transform}).
+
 -define(REGISTRY_TABLE, orca_table).
 -define(TAG_INDEX_TABLE, orca_tag_index).
 -define(PROPERTY_INDEX_TABLE, orca_property_index).

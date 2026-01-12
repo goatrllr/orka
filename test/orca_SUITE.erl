@@ -7,6 +7,7 @@
 %% Tests
 -export([
 	test_register_and_lookup/1,
+	test_register_badarg/1,
 	test_register_with_pid/1,
 	test_self_register/1,
 	test_lookup_not_found/1,
@@ -27,11 +28,20 @@
 	test_find_by_property_with_type/1,
 	test_count_by_property/1,
 	test_property_stats/1,
+	test_property_stats_empty/1,
+	test_find_by_property_not_found/1,
+	test_count_by_property_not_found/1,
+	test_entries_by_tag_not_found/1,
+	test_count_by_tag_not_found/1,
+	test_entries_by_type_not_found/1,
 	test_register_with/1,
 	test_register_with_existing_returns_entry/1,
 	test_register_with_failure/1,
+	test_register_with_badarg/1,
 	test_register_single/1,
 	test_register_single_constraint/1,
+	test_register_single_same_key_returns_existing/1,
+	test_register_single_badarg/1,
 	test_await_already_registered/1,
 	test_await_timeout/1,
 	test_await_registration/1,
@@ -41,7 +51,8 @@
 	test_concurrent_subscribers/1,
 	test_register_batch_basic/1,
 	test_register_batch_with_explicit_pids/1,
-	test_register_batch_per_user/1
+	test_register_batch_per_user/1,
+	test_register_batch_existing_entry/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -53,6 +64,7 @@
 all() ->
 	[
 		test_register_and_lookup,
+		test_register_badarg,
 		test_register_with_pid,
 		test_self_register,
 		test_lookup_not_found,
@@ -73,11 +85,20 @@ all() ->
 		test_find_by_property_with_type,
 		test_count_by_property,
 		test_property_stats,
+		test_property_stats_empty,
+		test_find_by_property_not_found,
+		test_count_by_property_not_found,
+		test_entries_by_tag_not_found,
+		test_count_by_tag_not_found,
+		test_entries_by_type_not_found,
 		test_register_with,
 		test_register_with_existing_returns_entry,
 		test_register_with_failure,
+		test_register_with_badarg,
 		test_register_single,
 		test_register_single_constraint,
+		test_register_single_same_key_returns_existing,
+		test_register_single_badarg,
 		test_await_already_registered,
 		test_await_timeout,
 		test_await_registration,
@@ -87,7 +108,8 @@ all() ->
 		test_concurrent_subscribers,
 		test_register_batch_basic,
 		test_register_batch_with_explicit_pids,
-		test_register_batch_per_user
+		test_register_batch_per_user,
+		test_register_batch_existing_entry
 	].
 
 init_per_suite(Config) ->
@@ -128,6 +150,13 @@ test_register_and_lookup(Config) ->
 	{ok, {Key, Pid, Metadata}} = orca:lookup(Key),
 
 	ct:log("✓ Successfully registered and looked up entry"),
+	Config.
+
+%% @doc Test register/3 invalid input returns badarg
+test_register_badarg(Config) ->
+	Key = {global, bad, input},
+	{error, badarg} = orca:register(Key, not_a_pid, #{}),
+	{error, badarg} = orca:register(Key, self(), not_a_map),
 	Config.
 
 %% @doc Test registration with explicit Pid (supervisor registration)
@@ -521,6 +550,43 @@ test_property_stats(Config) ->
 	ct:log("✓ Property statistics work correctly: ~p", [Stats]),
 	Config.
 
+%% @doc Test property_stats/2 returns empty map when no matches
+test_property_stats_empty(Config) ->
+	Stats = orca:property_stats(service, region),
+	#{} = Stats,
+	ct:log("✓ property_stats/2 returns empty map when no matches"),
+	Config.
+
+%% @doc Test find_by_property/2 returns empty list when no matches
+test_find_by_property_not_found(Config) ->
+	[] = orca:find_by_property(region, "nope"),
+	ct:log("✓ find_by_property/2 returns empty list when no matches"),
+	Config.
+
+%% @doc Test count_by_property/2 returns 0 when no matches
+test_count_by_property_not_found(Config) ->
+	0 = orca:count_by_property(region, "nope"),
+	ct:log("✓ count_by_property/2 returns 0 when no matches"),
+	Config.
+
+%% @doc Test entries_by_tag/1 returns empty list when no matches
+test_entries_by_tag_not_found(Config) ->
+	[] = orca:entries_by_tag(nonexistent_tag),
+	ct:log("✓ entries_by_tag/1 returns empty list when no matches"),
+	Config.
+
+%% @doc Test count_by_tag/1 returns 0 when no matches
+test_count_by_tag_not_found(Config) ->
+	0 = orca:count_by_tag(nonexistent_tag),
+	ct:log("✓ count_by_tag/1 returns 0 when no matches"),
+	Config.
+
+%% @doc Test entries_by_type/1 returns empty list when no matches
+test_entries_by_type_not_found(Config) ->
+	[] = orca:entries_by_type(nonexistent_type),
+	ct:log("✓ entries_by_type/1 returns empty list when no matches"),
+	Config.
+
 %% @doc Test register_with/3 - start and register a process atomically
 test_register_with(Config) ->
 	Key = {global, service, test_service},
@@ -581,6 +647,12 @@ test_register_with_failure(Config) ->
 	ct:log("✓ register_with/3 handles MFA failures correctly"),
 	Config.
 
+%% @doc Test register_with/3 invalid input returns badarg
+test_register_with_badarg(Config) ->
+	{error, badarg} = orca:register_with({global, service, bad}, not_a_map, {erlang, spawn, [fun() -> ok end]}),
+	{error, badarg} = orca:register_with({global, service, bad}, #{}, not_an_mfa),
+	Config.
+
 %% @doc Test register_single/3 - singleton constraint
 test_register_single(Config) ->
 	Key = {global, service, config_server},
@@ -600,6 +672,21 @@ test_register_single(Config) ->
 	true = is_process_alive(Pid),
 	
 	ct:log("✓ register_single/3 registers process with singleton constraint"),
+	Config.
+
+%% @doc Test register_single/3 returns existing entry for same key
+test_register_single_same_key_returns_existing(Config) ->
+	Key = {global, service, config_server_same},
+	Metadata = #{tags => [service, config]},
+	Metadata2 = #{tags => [service, config, updated]},
+
+	{ok, {Key, Pid, Meta1}} = orca:register_single(Key, Metadata),
+	{ok, {Key, Pid, Meta2}} = orca:register_single(Key, Pid, Metadata2),
+	NormalizedMeta = normalize_tags(Meta1),
+	NormalizedMeta = normalize_tags(Meta2),
+	{ok, {Key, Pid, LookupMeta}} = orca:lookup(Key),
+	NormalizedMeta = normalize_tags(Meta1),
+	NormalizedMeta = normalize_tags(LookupMeta),
 	Config.
 
 %% @doc Test register_single constraint - errors on other keys
@@ -624,6 +711,12 @@ test_register_single_constraint(Config) ->
 	{ok, {Key1, Pid, _}} = orca:lookup(Key1),
 	
 	ct:log("✓ register_single/3 errors for singleton Pid under another key"),
+	Config.
+
+%% @doc Test register_single/3 invalid input returns badarg
+test_register_single_badarg(Config) ->
+	{error, badarg} = orca:register_single({global, service, bad}, not_a_pid, #{}),
+	{error, badarg} = orca:register_single({global, service, bad}, self(), not_a_map),
 	Config.
 
 %% @doc Test await when key is already registered
@@ -914,6 +1007,17 @@ test_register_batch_per_user(Config) ->
 	5 = length(UserEntries),
 	
 	ct:log("✓ Per-user batch registration (trading app pattern) works"),
+	Config.
+
+%% @doc Test register_batch/1 keeps existing entries when key already registered
+test_register_batch_existing_entry(Config) ->
+	Key = {global, service, existing_batch},
+	Pid1 = spawn(fun() -> timer:sleep(10000) end),
+	Pid2 = spawn(fun() -> timer:sleep(10000) end),
+
+	{ok, {Key, Pid1, _}} = orca:register(Key, Pid1, #{tags => [service]}),
+	{ok, [{Key, Pid1, _}]} = orca:register_batch([{Key, Pid2, #{tags => [service]}}]),
+	{ok, {Key, Pid1, _}} = orca:lookup(Key),
 	Config.
 
 %% Helper functions
