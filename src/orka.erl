@@ -930,6 +930,7 @@ handle_call({lookup_all, all}, _From, State) ->
 handle_call({lookup_all, Scope}, _From, State) when Scope =:= local; Scope =:= global ->
 	{StoreMod, Store} = orka_scope:get_store(Scope, State),
 	{reply, StoreMod:all(Store), State};
+
 handle_call({entries_by_type, Type}, _From, State) ->
 	{StoreMod, Store} = orka_scope:get_store(local, State),
 	{reply, StoreMod:select_by_type(Type, Store), State};
@@ -942,6 +943,7 @@ handle_call({entries_by_type, Type, all}, _From, State) ->
 handle_call({entries_by_type, Type, Scope}, _From, State) when Scope =:= local; Scope =:= global ->
 	{StoreMod, Store} = orka_scope:get_store(Scope, State),
 	{reply, StoreMod:select_by_type(Type, Store), State};
+
 handle_call({entries_by_tag, Tag, all}, _From, State) ->
 	{LocalMod, LocalStore} = orka_scope:get_store(local, State),
 	{GlobalMod, GlobalStore} = orka_scope:get_store(global, State),
@@ -954,6 +956,7 @@ handle_call({entries_by_tag, Tag, Scope}, _From, State) when Scope =:= local; Sc
 handle_call({entries_by_tag, Tag}, _From, State) ->
 	{StoreMod, Store} = orka_scope:get_store(local, State),
 	{reply, StoreMod:select_by_tag(Tag, Store), State};
+
 handle_call({count_by_type, Type}, _From, State) ->
 	{StoreMod, Store} = orka_scope:get_store(local, State),
 	{reply, StoreMod:count_by_type(Type, Store), State};
@@ -966,6 +969,7 @@ handle_call({count_by_type, Type, all}, _From, State) ->
 handle_call({count_by_type, Type, Scope}, _From, State) when Scope =:= local; Scope =:= global ->
 	{StoreMod, Store} = orka_scope:get_store(Scope, State),
 	{reply, StoreMod:count_by_type(Type, Store), State};
+
 handle_call({count_by_tag, Tag}, _From, State) ->
 	{StoreMod, Store} = orka_scope:get_store(local, State),
 	{reply, StoreMod:count_by_tag(Tag, Store), State};
@@ -978,6 +982,7 @@ handle_call({count_by_tag, Tag, all}, _From, State) ->
 handle_call({count_by_tag, Tag, Scope}, _From, State) when Scope =:= local; Scope =:= global ->
 	{StoreMod, Store} = orka_scope:get_store(Scope, State),
 	{reply, StoreMod:count_by_tag(Tag, Store), State};
+
 handle_call({find_by_property, Prop, Value}, _From, State) ->
 	{StoreMod, Store} = orka_scope:get_store(local, State),
 	{reply, StoreMod:select_by_property(Prop, Value, Store), State};
@@ -993,6 +998,7 @@ handle_call({find_by_property, Type, Prop, Value, all}, _From, State) ->
 handle_call({find_by_property, Type, Prop, Value, Scope}, _From, State) when Scope =:= local; Scope =:= global ->
 	{StoreMod, Store} = orka_scope:get_store(Scope, State),
 	{reply, StoreMod:select_by_property(Type, Prop, Value, Store), State};
+
 handle_call({count_by_property, Prop, Value}, _From, State) ->
 	{StoreMod, Store} = orka_scope:get_store(local, State),
 	{reply, StoreMod:count_by_property(Prop, Value, Store), State};
@@ -1005,6 +1011,7 @@ handle_call({count_by_property, Prop, Value, all}, _From, State) ->
 handle_call({count_by_property, Prop, Value, Scope}, _From, State) when Scope =:= local; Scope =:= global ->
 	{StoreMod, Store} = orka_scope:get_store(Scope, State),
 	{reply, StoreMod:count_by_property(Prop, Value, Store), State};
+
 handle_call({property_stats, Type, Prop}, _From, State) ->
 	{StoreMod, Store} = orka_scope:get_store(local, State),
 	{reply, StoreMod:property_stats(Type, Prop, Store), State};
