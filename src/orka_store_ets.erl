@@ -24,10 +24,11 @@
     prop_tab :: ets:tid()
 }).
 
-init(_Opts) ->
-    Reg = ensure_table(?REGISTRY, [set, private, named_table]),
-    Tag = ensure_table(?TAG_IDX,  [bag, private, named_table]),
-    Prop= ensure_table(?PROP_IDX, [bag, private, named_table]),
+init(Opts) ->
+    {RegName, TagName, PropName} = table_names(maps:get(table_prefix, Opts, undefined)),
+    Reg = ensure_table(RegName, [set, private, named_table]),
+    Tag = ensure_table(TagName,  [bag, private, named_table]),
+    Prop= ensure_table(PropName, [bag, private, named_table]),
     {ok, #store{reg_tab=Reg, tag_tab=Tag, prop_tab=Prop}}.
 
 terminate(_Reason, _Store) ->
@@ -172,3 +173,17 @@ ensure_table(Name, Opts) ->
         undefined -> ets:new(Name, Opts);
         Tid -> Tid
     end.
+
+table_names(undefined) ->
+    {?REGISTRY, ?TAG_IDX, ?PROP_IDX};
+table_names(Prefix) when is_atom(Prefix) ->
+    {suffix_name(Prefix, "_table"),
+     suffix_name(Prefix, "_tag_index"),
+     suffix_name(Prefix, "_property_index")};
+table_names(Prefix) when is_list(Prefix) ->
+    table_names(list_to_atom(Prefix));
+table_names(Prefix) when is_binary(Prefix) ->
+    table_names(binary_to_atom(Prefix, latin1)).
+
+suffix_name(Prefix, Suffix) ->
+    list_to_atom(atom_to_list(Prefix) ++ Suffix).

@@ -835,9 +835,10 @@ property_stats(Type, PropertyName, Scope) ->
 
 init(Opts) when is_map(Opts) ->
 	StoreMod = orka_store_ets,
-	{ok, LocalHandle} = StoreMod:init(maps:get(local_store_opts, Opts, #{})),
-	GlobalMod = maps:get(global_store_mod, Opts, StoreMod),
-	GlobalOpts = maps:get(global_store_opts, Opts, #{}),
+	LocalOpts = maps:get(local_store_opts, Opts, application:get_env(orka, local_store_opts, #{})),
+	GlobalMod = maps:get(global_store_mod, Opts, application:get_env(orka, global_store_mod, StoreMod)),
+	GlobalOpts = maps:get(global_store_opts, Opts, application:get_env(orka, global_store_opts, #{})),
+	{ok, LocalHandle} = StoreMod:init(LocalOpts),
 	{ok, GlobalHandle} = GlobalMod:init(GlobalOpts),
 	State = #orca_state{
 		local_store = {StoreMod, LocalHandle},
