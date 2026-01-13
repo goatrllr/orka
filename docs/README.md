@@ -125,14 +125,27 @@ Including:
 
 All examples and patterns have been tested:
 
-- **71/71 tests passing** in Common Test suite
+- **85/85 tests passing** in Common Test suite across 9 test suites
 - Coverage includes: registration, lookups, tags, properties, singleton, await, subscribe, batch operations
+- Backend-agnostic tests verify behavior across pluggable store implementations
+- Concurrency, property-based testing, and regression testing
+
+Breakdown by suite:
+- **orka_SUITE** (57) — Core registry functionality
+- **orka_app_SUITE** (5) — Application startup and supervision
+- **orka_scope_SUITE** (3) — Local/global scope isolation
+- **orka_store_SUITE** (7) — Store backend implementations
+- **orka_property_SUITE** (2) — Property-based testing
+- **orka_concurrency_SUITE** (2) — Concurrent operations
+- **orka_extra_SUITE** (4) — Extended features
+- **orka_issue_regression_SUITE** (3) — Issue fixes
+- **orka_gpt_regression_SUITE** (3) — Regression tests
 
 See `test/orka_SUITE.erl` for test implementations.
 
 ## Performance Notes
 
-- **Lookup**: ~1-2 microseconds (ETS public table)
+- **Lookup**: fast (ETS backend; read path via store abstraction)
 - **Registration**: ~10-20 microseconds (gen_server + monitor)
 - **Tag query**: O(n) where n = entries with tag (usually small)
 
@@ -141,8 +154,8 @@ Not suitable for per-message operations, but excellent for service discovery and
 ## Architecture Notes
 
 Orka uses:
-- **ETS public tables** for lock-free reads
-- **gen_server** for atomic writes with monitors
+- **ETS protected named tables** behind the store abstraction (lock-free reads)
+- **gen_server** for atomic writes and routing
 - **Process monitors** for automatic cleanup
 - **Tag and property indices** for efficient querying
 

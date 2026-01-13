@@ -29,16 +29,16 @@ default_scope(_Key) ->
     local.
 
 %% `State` is the orka gen_server state. Keep this function tiny and fast.
--spec store_for(scope(), State :: #orca_state{}) -> {module(), term()}.
+-spec store_for(scope(), State :: #orka_state{}) -> {module(), term()}.
 store_for(Scope, State) ->
     get_store(Scope, State).
 
--spec get_store(scope(), State :: #orca_state{}) -> {module(), term()}.
-get_store(local, #orca_state{local_store = Store}) -> Store;
-get_store(global, #orca_state{global_store = Store}) -> Store.
+-spec get_store(scope(), State :: #orka_state{}) -> {module(), term()}.
+get_store(local, #orka_state{local_store = Store}) -> Store;
+get_store(global, #orka_state{global_store = Store}) -> Store.
 
--spec put_store(scope(), {module(), term()}, #orca_state{}) -> #orca_state{}.
+-spec put_store(scope(), {module(), term()}, #orka_state{}) -> #orka_state{}.
 put_store(local, Store, State) ->
-    State#orca_state{local_store = Store};
+    State#orka_state{local_store = Store};
 put_store(global, Store, State) ->
-    State#orca_state{global_store = Store}.
+    State#orka_state{global_store = Store}.

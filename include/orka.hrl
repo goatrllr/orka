@@ -1,4 +1,4 @@
--record(orca_state, {
+-record(orka_state, {
     local_store  :: {module(), term()},
     global_store :: {module(), term()},
     pid_singleton = #{} :: map(),

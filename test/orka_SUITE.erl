@@ -7,6 +7,7 @@
 %% Tests
 -export([
 	test_register_and_lookup/1,
+	test_lookup_dirty/1,
 	test_register_badarg/1,
 	test_register_with_pid/1,
 	test_self_register/1,
@@ -72,6 +73,7 @@
 all() ->
 	[
 		test_register_and_lookup,
+		test_lookup_dirty,
 		test_register_badarg,
 		test_register_with_pid,
 		test_self_register,
@@ -166,6 +168,16 @@ test_register_and_lookup(Config) ->
 	{ok, {Key, Pid, Metadata}} = orka:lookup(Key),
 
 	ct:log("✓ Successfully registered and looked up entry"),
+	Config.
+
+%% @doc Test dirty lookup uses ETS without liveness check
+test_lookup_dirty(Config) ->
+	Key = {global, user_dirty, service_x},
+	Pid = spawn(fun() -> timer:sleep(10000) end),
+	Metadata = #{dirty => true},
+
+	{ok, _} = orka:register(Key, Pid, Metadata),
+	{ok, {Key, Pid, Metadata}} = orka:lookup_dirty(Key),
 	Config.
 
 %% @doc Test register/3 invalid input returns badarg
@@ -293,8 +305,8 @@ test_process_cleanup_on_exit(Config) ->
 	%% Wait for process to exit
 	timer:sleep(200),
 
-	%% Entry should be automatically removed
-	not_found = orka:lookup(Key),
+	%% Entry should be automatically removed by liveness check
+	not_found = orka:lookup_alive(Key),
 
 	ct:log("✓ Automatic cleanup on process exit works"),
 	Config.

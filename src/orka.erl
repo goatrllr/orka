@@ -10,7 +10,7 @@
 -export([register_single/2, register_single/3]).
 -export([unregister/1, unregister_batch/1]).
 -export([await/2, subscribe/1, unsubscribe/1]).
--export([lookup/1]).
+-export([lookup/1, lookup_alive/1, lookup_dirty/1]).
 -export([lookup_all/0, lookup_all/1]).
 -export([add_tag/2, remove_tag/2]).
 -export([update_metadata/2]).
@@ -416,6 +416,26 @@ unsubscribe(Key) ->
 -spec lookup(Key) -> {ok, {Key, pid(), map()}} | not_found.
 lookup(Key) ->
 	gen_server:call(?MODULE, {lookup, Key}).
+
+%% @doc Lookup only if the registered Pid is alive.
+lookup_alive(Key) ->
+	gen_server:call(?MODULE, {lookup_alive, Key}).
+
+%% @doc Lock-free lookup via the ETS backend (no liveness check).
+lookup_dirty(Key) ->
+	Scope = orka_scope:route(Key),
+	StoreMod = case Scope of
+		local -> orka_store_ets;
+		global -> application:get_env(orka, global_store_mod, orka_store_ets)
+	end,
+	StoreOpts = case Scope of
+		local -> application:get_env(orka, local_store_opts, #{});
+		global -> application:get_env(orka, global_store_opts, #{})
+	end,
+	case StoreMod of
+		orka_store_ets -> orka_store_ets:lookup_dirty(Key, StoreOpts);
+		_ -> {error, not_supported}
+	end.
 
 
 %% @doc Return all entries in the registry.
@@ -840,7 +860,7 @@ init(Opts) when is_map(Opts) ->
 	GlobalOpts = maps:get(global_store_opts, Opts, application:get_env(orka, global_store_opts, #{})),
 	{ok, LocalHandle} = StoreMod:init(LocalOpts),
 	{ok, GlobalHandle} = GlobalMod:init(GlobalOpts),
-	State = #orca_state{
+	State = #orka_state{
 		local_store = {StoreMod, LocalHandle},
 		global_store = {GlobalMod, GlobalHandle}
 	},
@@ -849,9 +869,9 @@ init(Opts) ->
 	init(maps:from_list(Opts)).
 
 %% @doc Handle registration requests
-handle_call(Msg, From, State) when not is_record(State, orca_state) ->
+handle_call(Msg, From, State) when not is_record(State, orka_state) ->
 	handle_call(Msg, From, ensure_state(State));
-handle_call({register, Key, Pid, Metadata}, _From, State=#orca_state{pid_singleton = PidSingleton}) ->
+handle_call({register, Key, Pid, Metadata}, _From, State=#orka_state{pid_singleton = PidSingleton}) ->
 	{Scope, {StoreMod, Store}} = store_for_key(Key, State),
 	case maps:get(Pid, PidSingleton, undefined) of
 		undefined ->
@@ -904,7 +924,7 @@ handle_call({unregister_batch, Keys}, _From, State) ->
 	{reply, {ok, {lists:reverse(RemovedKeys), lists:reverse(NotFoundKeys)}}, FinalState};
 
 %% @doc Handle read-only queries via the store backend
-handle_call({lookup, Key}, _From, State) ->
+handle_call({lookup_alive, Key}, _From, State) ->
 	{_Scope, {StoreMod, Store}} = store_for_key(Key, State),
 	case StoreMod:get(Key, Store) of
 		{ok, {Key, Pid, _} = Entry} ->
@@ -917,6 +937,14 @@ handle_call({lookup, Key}, _From, State) ->
 						{not_found, UpdatedState} -> {reply, not_found, UpdatedState}
 					end
 			end;
+		not_found ->
+			{reply, not_found, State}
+	end;
+handle_call({lookup, Key}, _From, State) ->
+	{_Scope, {StoreMod, Store}} = store_for_key(Key, State),
+	case StoreMod:get(Key, Store) of
+		{ok, Entry} ->
+			{reply, {ok, Entry}, State};
 		not_found ->
 			{reply, not_found, State}
 	end;
@@ -1119,7 +1147,7 @@ handle_call({register_with, Key, Metadata, M, F, A}, _From, State) ->
 			register_with_start(Key, Metadata, M, F, A, Scope, State)
 	end;
 
-handle_call({register_single, Key, Pid, Metadata}, _From, State=#orca_state{pid_singleton = PidSingleton, pid_keys = PidKeyMap}) ->
+handle_call({register_single, Key, Pid, Metadata}, _From, State=#orka_state{pid_singleton = PidSingleton, pid_keys = PidKeyMap}) ->
 	{Scope, _} = store_for_key(Key, State),
 	%% Check if this Pid is already registered as singleton
 	case maps:get(Pid, PidSingleton, undefined) of
@@ -1130,12 +1158,12 @@ handle_call({register_single, Key, Pid, Metadata}, _From, State=#orca_state{pid_
 					%% Pid not registered, proceed with registration
 					case do_register(Key, Pid, Metadata, Scope, State) of
 						{reply, Reply, State1} ->
-							UpdatedSingleton = State1#orca_state.pid_singleton,
+							UpdatedSingleton = State1#orka_state.pid_singleton,
 							case Reply of
 								{ok, Entry} ->
 									%% Add to singleton map
 									NewSingleton = maps:put(Pid, Key, UpdatedSingleton),
-									{reply, {ok, Entry}, State1#orca_state{pid_singleton = NewSingleton}};
+									{reply, {ok, Entry}, State1#orka_state{pid_singleton = NewSingleton}};
 								_ ->
 									{reply, Reply, State1}
 							end
@@ -1162,7 +1190,7 @@ handle_call({register_single, Key, Pid, Metadata}, _From, State=#orca_state{pid_
 	end;
 
 %% @doc Handle subscribe-await requests - non-blocking subscription with timeout tracking
-handle_call({subscribe_await, Key, CallerPid, Timeout}, _From, State=#orca_state{subscribers = Subscribers}) ->
+handle_call({subscribe_await, Key, CallerPid, Timeout}, _From, State=#orka_state{subscribers = Subscribers}) ->
 	{_Scope, {StoreMod, Store}} = store_for_key(Key, State),
 	case StoreMod:get(Key, Store) of
 		{ok, Entry} ->
@@ -1184,11 +1212,11 @@ handle_call({subscribe_await, Key, CallerPid, Timeout}, _From, State=#orca_state
 					CallerPid
 			end,
 			NewSubscribers = maps:put(Key, [SubEntry | SubscribersList], Subscribers),
-			{reply, ok, State#orca_state{subscribers = NewSubscribers}}
+			{reply, ok, State#orka_state{subscribers = NewSubscribers}}
 	end;
 
 %% @doc Handle subscribe requests - non-blocking subscription to key registration
-handle_call({subscribe, Key, CallerPid}, _From, State=#orca_state{subscribers = Subscribers}) ->
+handle_call({subscribe, Key, CallerPid}, _From, State=#orka_state{subscribers = Subscribers}) ->
 	{_Scope, {StoreMod, Store}} = store_for_key(Key, State),
 	case StoreMod:get(Key, Store) of
 		{ok, Entry} ->
@@ -1199,11 +1227,11 @@ handle_call({subscribe, Key, CallerPid}, _From, State=#orca_state{subscribers = 
 			%% Key not registered, add to subscribers map
 			SubscribersList = maps:get(Key, Subscribers, []),
 			NewSubscribers = maps:put(Key, [CallerPid | SubscribersList], Subscribers),
-			{reply, ok, State#orca_state{subscribers = NewSubscribers}}
+			{reply, ok, State#orka_state{subscribers = NewSubscribers}}
 	end;
 
 %% @doc Handle unsubscribe requests - cancel subscription to key registration
-handle_call({unsubscribe, Key, CallerPid}, _From, State=#orca_state{subscribers = Subscribers}) ->
+handle_call({unsubscribe, Key, CallerPid}, _From, State=#orka_state{subscribers = Subscribers}) ->
 	case maps:get(Key, Subscribers, []) of
 		[] ->
 			%% No subscribers for this key
@@ -1228,11 +1256,11 @@ handle_call({unsubscribe, Key, CallerPid}, _From, State=#orca_state{subscribers 
 				[] -> maps:remove(Key, Subscribers);
 				_ -> maps:put(Key, NewList, Subscribers)
 			end,
-			{reply, ok, State#orca_state{subscribers = NewSubscribers}}
+			{reply, ok, State#orka_state{subscribers = NewSubscribers}}
 	end.
 
 %% @doc Handle process 'DOWN' messages from monitors
-handle_info(Info, State) when not is_record(State, orca_state) ->
+handle_info(Info, State) when not is_record(State, orka_state) ->
 	handle_info(Info, ensure_state(State));
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
 	%% Get all keys associated with this pid
@@ -1244,7 +1272,7 @@ handle_info(_Info, State) ->
 	{noreply, State}.
 
 %% @doc Handle async messages (not used currently)
-handle_cast(Msg, State) when not is_record(State, orca_state) ->
+handle_cast(Msg, State) when not is_record(State, orka_state) ->
 	handle_cast(Msg, ensure_state(State));
 handle_cast({cleanup_dead, Key, Pid}, State) ->
 	{_Scope, {StoreMod, Store}} = store_for_key(Key, State),
@@ -1261,7 +1289,7 @@ handle_cast(_Msg, State) ->
 	{noreply, State}.
 
 %% @doc Cleanup on termination
-terminate(Reason, State) when is_record(State, orca_state) ->
+terminate(Reason, State) when is_record(State, orka_state) ->
 	{LocalMod, LocalStore} = orka_scope:get_store(local, State),
 	{GlobalMod, GlobalStore} = orka_scope:get_store(global, State),
 	_ = LocalMod:terminate(Reason, LocalStore),
@@ -1291,10 +1319,10 @@ merge_count_maps(Base, Add) ->
 		maps:put(Key, maps:get(Key, Acc, 0) + Value, Acc)
 	end, Base, Add).
 
-ensure_state(State) when is_record(State, orca_state) ->
+ensure_state(State) when is_record(State, orka_state) ->
 	State;
 ensure_state({StoreMod, Store, PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
-	#orca_state{
+	#orka_state{
 		local_store = {StoreMod, Store},
 		global_store = {StoreMod, Store},
 		pid_singleton = PidSingleton,
@@ -1304,7 +1332,7 @@ ensure_state({StoreMod, Store, PidSingleton, PidKeyMap, Subscribers, MonitorMap}
 	};
 ensure_state({Store, PidSingleton, PidKeyMap, Subscribers, MonitorMap}) when is_tuple(Store) ->
 	StoreMod = orka_store_ets,
-	#orca_state{
+	#orka_state{
 		local_store = {StoreMod, Store},
 		global_store = {StoreMod, Store},
 		pid_singleton = PidSingleton,
@@ -1313,7 +1341,7 @@ ensure_state({Store, PidSingleton, PidKeyMap, Subscribers, MonitorMap}) when is_
 		monitor_map = MonitorMap
 	};
 ensure_state({StoreMod, Store, PidSingleton, PidKeyMap, Subscribers}) when is_atom(StoreMod) ->
-	#orca_state{
+	#orka_state{
 		local_store = {StoreMod, Store},
 		global_store = {StoreMod, Store},
 		pid_singleton = PidSingleton,
@@ -1323,7 +1351,7 @@ ensure_state({StoreMod, Store, PidSingleton, PidKeyMap, Subscribers}) when is_at
 ensure_state({PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	StoreMod = orka_store_ets,
 	{ok, Store} = StoreMod:init(#{}),
-	#orca_state{
+	#orka_state{
 		local_store = {StoreMod, Store},
 		global_store = {StoreMod, Store},
 		pid_singleton = PidSingleton,
@@ -1333,7 +1361,7 @@ ensure_state({PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	}.
 
 %% @doc Perform the actual registration (fast path)
-do_register(Key, Pid, Metadata, Scope, State=#orca_state{pid_keys = PidKeyMap, subscribers = Subscribers, monitor_map = MonitorMap}) ->
+do_register(Key, Pid, Metadata, Scope, State=#orka_state{pid_keys = PidKeyMap, subscribers = Subscribers, monitor_map = MonitorMap}) ->
 	%% Monitor the pid only if it's new to the registry
 	{NewMonitorMap, _} = maybe_monitor_pid(Pid, PidKeyMap, MonitorMap),
 
@@ -1351,10 +1379,10 @@ do_register(Key, Pid, Metadata, Scope, State=#orca_state{pid_keys = PidKeyMap, s
 	%% Notify any subscribers waiting for this key
 	NewSubscribers = notify_subscribers(Key, Entry, Subscribers),
 
-	{reply, {ok, Entry}, State1#orca_state{pid_keys = NewPidKeyMap, subscribers = NewSubscribers, monitor_map = NewMonitorMap}}.
+	{reply, {ok, Entry}, State1#orka_state{pid_keys = NewPidKeyMap, subscribers = NewSubscribers, monitor_map = NewMonitorMap}}.
 
 %% @doc Remove a single key from registry and update state (internal helper)
-do_unregister(Key, State=#orca_state{pid_singleton = PidSingleton, pid_keys = PidKeyMap, monitor_map = MonitorMap}) ->
+do_unregister(Key, State=#orka_state{pid_singleton = PidSingleton, pid_keys = PidKeyMap, monitor_map = MonitorMap}) ->
 	{Scope, {StoreMod, Store}} = store_for_key(Key, State),
 	case StoreMod:get(Key, Store) of
 		{ok, {Key, Pid, _}} ->
@@ -1379,7 +1407,7 @@ do_unregister(Key, State=#orca_state{pid_singleton = PidSingleton, pid_keys = Pi
 				true -> MonitorMap;
 				false -> maybe_demonitor_pid(Pid, MonitorMap)
 			end,
-			{ok, State1#orca_state{pid_singleton = NewSingleton, pid_keys = FinalMap, monitor_map = FinalMonitors}};
+			{ok, State1#orka_state{pid_singleton = NewSingleton, pid_keys = FinalMap, monitor_map = FinalMonitors}};
 		not_found ->
 			{not_found, State}
 	end.
@@ -1424,7 +1452,7 @@ register_with_start(Key, Metadata, M, F, A, Scope, State) ->
 	end.
 
 %% Synchronous version of do_register for batch operations (doesn't return reply tuple)
-do_register_sync(Key, Pid, Metadata, Scope, State=#orca_state{pid_keys = PidKeyMap, subscribers = Subscribers, monitor_map = MonitorMap}) ->
+do_register_sync(Key, Pid, Metadata, Scope, State=#orka_state{pid_keys = PidKeyMap, subscribers = Subscribers, monitor_map = MonitorMap}) ->
 	%% Check if already monitoring this pid
 	{NewMonitorMap, _} = maybe_monitor_pid(Pid, PidKeyMap, MonitorMap),
 
@@ -1442,7 +1470,7 @@ do_register_sync(Key, Pid, Metadata, Scope, State=#orca_state{pid_keys = PidKeyM
 	%% Notify any subscribers waiting for this key
 	NewSubscribers = notify_subscribers(Key, Entry, Subscribers),
 
-	{ok, Entry, State1#orca_state{pid_keys = NewPidKeyMap, subscribers = NewSubscribers, monitor_map = NewMonitorMap}}.
+	{ok, Entry, State1#orka_state{pid_keys = NewPidKeyMap, subscribers = NewSubscribers, monitor_map = NewMonitorMap}}.
 
 normalize_tags(Metadata) ->
 	case maps:get(tags, Metadata, undefined) of
@@ -1480,7 +1508,7 @@ cleanup_new_monitors(MonitorMap, PrevMonitorMap) ->
 		end
 	end, maps:to_list(MonitorMap)).
 
-remove_dead_pid_entries(Pid, State=#orca_state{pid_keys = PidKeyMap}) ->
+remove_dead_pid_entries(Pid, State=#orka_state{pid_keys = PidKeyMap}) ->
 	%% Get all keys associated with this pid
 	case maps:get(Pid, PidKeyMap, []) of
 		[] ->
@@ -1520,7 +1548,7 @@ register_batch_entries([], State, _PrevState, Entries, _NewEntries, _FailedKeys)
 	%% All succeeded
 	{reply, {ok, lists:reverse(Entries)}, State};
 
-register_batch_entries([Reg | Rest], State=#orca_state{pid_singleton = PidSingleton}, PrevState, Entries, NewEntries, FailedKeys) ->
+register_batch_entries([Reg | Rest], State=#orka_state{pid_singleton = PidSingleton}, PrevState, Entries, NewEntries, FailedKeys) ->
 	%% Parse registration tuple - {Key, Pid, Metadata}
 	{Key, Pid, Metadata} = Reg,
 
@@ -1576,7 +1604,7 @@ register_batch_entries([Reg | Rest], State=#orca_state{pid_singleton = PidSingle
 
 %% Rollback registered entries
 rollback_batch(Entries, State, PrevState) ->
-	cleanup_new_monitors(State#orca_state.monitor_map, PrevState#orca_state.monitor_map),
+	cleanup_new_monitors(State#orka_state.monitor_map, PrevState#orka_state.monitor_map),
 	_ = lists:foldl(fun({Key, _Pid, _Meta}, AccState) ->
 		{Scope, {StoreMod, Store}} = store_for_key(Key, AccState),
 		case StoreMod:del(Key, Store) of

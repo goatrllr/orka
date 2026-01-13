@@ -6,9 +6,9 @@
 
 </div>
 
-Orka is a production-ready **ETS-based process registry** for Erlang/OTP applications. It provides fast, lock-free lookups with features for registration, metadata management, tags, properties, and startup coordination.
+Orka is a production-ready **pluggable process registry** for Erlang/OTP applications. It provides fast lookups via pluggable backends (ETS-based by default), with features for registration, metadata management, tags, properties, and startup coordination. Built with a pathway to distribution-aware backends.
 
-**Status**: ✅ Fully tested (71/71 tests passing) | **Latest**: Batch registration support | **License**: MIT
+**Status**: ✅ Fully tested (85/85 tests passing) | **Latest**: Pluggable backend architecture | **License**: MIT
 
 ---
 
@@ -230,7 +230,7 @@ Register with singleton constraint: **one key per Pid**. A process can only be r
 
 #### `lookup(Key) -> {ok, {Key, Pid, Metadata}} | not_found`
 
-Fast, lock-free lookup of a single entry by key.
+Fast lookup of a single entry by key (does not check liveness).
 
 ```erlang
 case orka:lookup({global, service, translator}) of
@@ -238,7 +238,38 @@ case orka:lookup({global, service, translator}) of
         %% Service found
         ok;
     not_found -> 
+        %% Service not registered
+        error
+end.
+```
+
+#### `lookup_alive(Key) -> {ok, {Key, Pid, Metadata}} | not_found`
+
+Lookup that verifies the registered Pid is alive. If the process is dead, the
+entry is removed and `not_found` is returned.
+
+```erlang
+case orka:lookup_alive({global, service, translator}) of
+    {ok, {_Key, Pid, _Meta}} ->
+        %% Service found and alive
+        ok;
+    not_found ->
         %% Service not registered or process crashed
+        error
+end.
+```
+
+#### `lookup_dirty(Key) -> {ok, {Key, Pid, Metadata}} | not_found | {error, not_supported}`
+
+Lock-free ETS lookup (no liveness check). Only supported for the ETS backend.
+
+```erlang
+case orka:lookup_dirty({global, service, translator}) of
+    {ok, {_Key, Pid, _Meta}} ->
+        %% Service found (no liveness check)
+        ok;
+    not_found ->
+        %% Service not registered
         error
 end.
 ```
@@ -808,33 +839,90 @@ get_translator() ->
 
 ---
 
-## Design Principles
+## Backend Architecture
 
-### 1. Lock-Free Reads
+Orka's core is **backend-agnostic**: the registry logic is decoupled from storage, allowing different backends for different use cases.
 
-All `lookup_*` operations use ETS public tables without locking. Only writes (registration, unregistration) go through the gen_server.
+### Current Implementation
+
+- **`orka_store_ets`** — Default backend (ETS-based)
+  - Separate stores for `local` and `global` scoped entries
+  - Protected named ETS tables (supports `lookup_dirty/1`)
+  - Efficient indices for tags and properties
+  - Single-node performance: ~1-2 microseconds for lookups
+
+### Pluggable Backend Interface
+
+Backends implement the `orka_store` behaviour:
 
 ```erlang
-%% These are fast, lock-free
+%% Lifecycle
+-callback init(Opts :: map()) -> {ok, store()}.
+-callback terminate(Reason, Store) -> ok.
+
+%% Core CRUD operations
+-callback get(Key, Store) -> {ok, entry()} | not_found.
+-callback put(Key, Pid, Meta, Store) -> {ok, entry(), Store1}.
+-callback del(Key, Store) -> {ok, Store1} | {not_found, Store1}.
+
+%% Queries
+-callback select_by_type(Type, Store) -> [entry()].
+-callback select_by_tag(Tag, Store) -> [entry()].
+-callback select_by_property(Prop, Value, Store) -> [entry()].
+-callback count_by_type(Type, Store) -> non_neg_integer().
+-callback property_stats(Type, Prop, Store) -> map().
+
+%% Bulk operations
+-callback put_many(Items, Store) -> {ok, [entry()], Store1}.
+-callback del_many(Keys, Store) -> {ok, Store1}.
+```
+
+### Future Backend Extensions
+
+- **RA** — Replicated state machine for cluster-wide registries
+- **Khepri** — Tree-structured database for distributed registries
+- **Riak Core** — Distributed hashtree for high-availability systems
+- **Custom** — User-defined backends for domain-specific needs
+
+See [docs/extensions/](docs/extensions/) for implementation guides.
+
+---
+
+## Design Principles
+
+### 1. Backend Abstraction
+
+The registry interface is independent of storage. Swap backends to change consistency/performance trade-offs without changing your code:
+- **ETS** — Local-only, ultra-fast
+- **RA/Khepri** — Distributed, replicated, eventual consistency
+
+```erlang
+%% These are fast, backend-specific reads
 Entry = orka:lookup(Key),
 All = orka:lookup_all(),
 Tagged = orka:entries_by_tag(online),
 Count = orka:count_by_type(service).
 ```
 
-### 2. Automatic Cleanup
+### 2. Backend-Specific Read Semantics
 
-Process crashes are detected via monitors and entries are automatically removed. Manual cleanup is optional.
+Read behavior depends on the configured backend. The default ETS backend uses
+named tables behind a store abstraction, and reads go through the gen_server
+for consistent routing and optional liveness checks (see `lookup_alive/1`).
 
 ```erlang
 %% Automatic cleanup when process exits
 orka:register({global, user, alice}, AlicePid, Meta),
 exit(AlicePid, kill),  %% Process dies
 timer:sleep(100),
-not_found = orka:lookup({global, user, alice}).  %% Entry gone
+not_found = orka:lookup_alive({global, user, alice}).  %% Entry gone
 ```
 
-### 3. Three Key Patterns
+### 3. Automatic Cleanup via Monitors
+
+Process crashes are detected via monitors and entries are automatically removed. Manual cleanup is optional.
+
+### 4. Three Key Patterns for Metadata
 
 **Tags** — For categorization and querying groups:
 ```erlang
@@ -854,10 +942,18 @@ orka:find_by_property(region, "us-west").  %% Find by attribute
 orka:entries_by_type(service). %% Query by type
 ```
 
-### 4. Consistency Model
+### 5. Consistency Model (Backend-Dependent)
 
+**ETS Backend (Default)**:
 - **Local consistency**: Strong (ETS is immediate)
-- **Distributed consistency**: Not supported (use syn for that)
+- **Distributed consistency**: Not supported
+- **Scope**: Single-node registries only
+
+**Planned Distributed Backends**:
+- **RA/Khepri**: Replicated state machine for cluster-wide consistency
+- **Custom**: User-defined consistency models
+
+**Universal**:
 - **Process lifecycle**: Automatic (monitors)
 - **Await/Subscribe**: Guaranteed delivery (with optional timeouts)
 
@@ -938,9 +1034,35 @@ If a key is already registered with a **live process**, the existing entry is re
 
 This allows safe batch re-registration - existing services aren't replaced if still running. If you need to replace a running process, unregister it first or use `register/3` with a specific Pid.
 
-### Q: Can I use orka with a distributed system?
+### Q: Can I use orka in a distributed system?
 
-Orka is local-node only. For distributed process groups, see the [orka_syn integration patterns documentation](docs/extensions/orka_syn.md).
+**Currently**: Orka is local-node only. The default ETS backend handles single-node registries.
+
+**Planned**: Future extensions will support distributed backends:
+- **RA backend** — Replicated state machine for cluster-wide registries
+- **Khepri backend** — Tree-structured database for high-availability systems
+- **Custom backends** — Implement the `orka_store` behaviour for domain-specific needs
+
+See [docs/extensions/](docs/extensions/) for implementation guides and roadmap.
+
+### Q: How do backends work?
+
+Orka decouples the registry logic from storage. The `orka_store` behaviour defines the interface:
+
+```erlang
+-callback get(Key, Store) -> {ok, entry()} | not_found.
+-callback put(Key, Pid, Meta, Store) -> {ok, entry(), Store1}.
+-callback select_by_type(Type, Store) -> [entry()].
+-callback select_by_tag(Tag, Store) -> [entry()].
+%% ... etc
+```
+
+You implement this behaviour for different storage engines:
+- **ETS**: Single-node, ultra-fast
+- **RA**: Replicated, eventual consistency
+- **Custom**: Your own consistency model
+
+Same API, different backends.
 
 ### Q: How do I test my code that uses orka?
 
@@ -954,9 +1076,12 @@ Property-based testing (PropEr) is less suitable because orka's challenges are c
 
 ### Q: What's the performance overhead?
 
+**ETS backend (default)**:
 - **Lookup**: ~1-2 microseconds (ETS public table)
 - **Registration**: ~10-20 microseconds (gen_server call + ETS insert + monitor)
 - **Tag query**: O(n) where n = entries with tag (typically small)
+
+**Other backends**: Performance varies by implementation (see [docs/extensions/](docs/extensions/)).
 
 Not suitable for per-message operations, but fine for service startup and occasional queries.
 

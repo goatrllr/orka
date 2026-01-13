@@ -4,22 +4,23 @@
 
 ![Orka Logo](docs/images/orka_logo.png)
 
-![Tests](https://img.shields.io/badge/tests-71%2F71%20passing-brightgreen) ![Status](https://img.shields.io/badge/status-production%20ready-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+![Tests](https://img.shields.io/badge/tests-85%2F85%20passing-brightgreen) ![Status](https://img.shields.io/badge/status-production%20ready-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
 </div>
 
-Orka is a **high-performance, ETS-based process registry** for Erlang/OTP applications. It provides fast lock-free lookups, automatic process lifecycle management, rich metadata querying, and startup coordination features.
+Orka is a **high-performance, pluggable process registry** for Erlang/OTP applications. It provides fast lookups via pluggable backends (ETS-based by default), automatic process lifecycle management, rich metadata querying, and startup coordination features. Built with a pathway to distribution-aware backends like RA, Khepri, or Riak-core.
 
 ## What Orka Provides
 
-✅ **Fast registration & lookup** — O(1) lookups via ETS public tables  
+✅ **Fast registration & lookup** — O(1) lookups via pluggable backends  
+✅ **Pluggable backends** — ETS (default), extensible to RA, Khepri, Riak-core  
 ✅ **Automatic cleanup** — Process monitors handle crashes  
 ✅ **Rich metadata** — Tags and properties for flexible querying  
 ✅ **Startup coordination** — Await/subscribe for service dependencies  
 ✅ **Batch operations** — Atomic multi-process registration  
 ✅ **Singleton pattern** — One-key-per-process constraint  
 ✅ **Zero dependencies** — Pure Erlang/OTP, no external deps  
-✅ **Fully tested** — 71 test cases, all passing  
+✅ **Fully tested** — 85 test cases, all passing  
 
 ## Use Cases
 
@@ -40,8 +41,8 @@ orka:register({global, service, translator}, Pid, #{
     properties => #{capacity => 100, version => "2.1"}
 }).
 
-%% Lookup by key
-{ok, {Key, Pid, Metadata}} = orka:lookup({global, service, translator}).
+%% Lookup by key (checks liveness)
+{ok, {Key, Pid, Metadata}} = orka:lookup_alive({global, service, translator}).
 
 %% Query by tag
 OnlineServices = orka:entries_by_tag(online).
@@ -76,46 +77,58 @@ Start with **[API.md](API.md)** for complete documentation, then explore:
 ## Architecture
 
 ```
-┌─────────────────────────────────────┐
-│      Orka Gen_Server                │
-│  (registration, monitors, notify)   │
-└──────────────┬──────────────────────┘
-               │
-      ┌────────┴────────┐
-      │                 │
-      ▼                 ▼
-┌─────────────┐  ┌──────────────┐
-│ ETS Public  │  │ State Maps   │
-│ Tables      │  │ {PidSingleton│
-│             │  │  PidKeyMap   │
-│ • registry  │  │  Subscribers │
-│ • tag_idx   │  │  MonitorMap} │
-│ • prop_idx  │  └──────────────┘
-└─────────────┘
+┌────────────────────────────────────────────────────────────┐
+│         Orka Gen_Server                                    │
+│  (registration, monitors, notify)                          │
+└────────────────────┬─────────────────────────────────────┘
+                     │
+      ┌──────────────┴──────────────┐
+      │                             │
+      ▼                             ▼
+┌──────────────────┐      ┌────────────────┐
+│ orka_store       │      │  State Maps    │
+│  (pluggable)     │      │ {PidSingleton  │
+│                  │      │  PidKeyMap     │
+│  ┌────────────┐  │      │  Subscribers   │
+│  │  Backend   │  │      │  MonitorMap}   │
+│  │            │  │      └────────────────┘
+│  │ • ETS(dflt)│  │
+│  │ • RA       │  │
+│  │ • Khepri   │  │
+│  │ • custom   │  │
+│  └────────────┘  │
+└──────────────────┘
 ```
 
 **Key features**:
-- ETS public tables for lock-free reads
+- **Pluggable backends** — Swap implementations for different guarantees
+  - `orka_store_ets` — Default, local-node with separate local/global stores
+  - Extensible for `ra`, `khepri`, `riak-core`, etc. (see [docs/extensions](docs/extensions/))
 - Gen_server for atomic writes with monitors
 - Process monitors for automatic cleanup
 - Efficient indices for tags and properties
 
 ## Performance
 
+**ETS backend (default)**:
 - **Lookup**: ~1-2 microseconds (ETS public table)
 - **Registration**: ~10-20 microseconds (gen_server call + monitor)
 - **Tag query**: O(n) where n = entries with tag (usually small)
 
 **Suitable for**: Service discovery, startup coordination, process tracking (<10K lookups/sec)
 
-**Not suitable for**: Per-message routing in high-throughput systems (>100K msg/sec). See [message systems extensions](docs/extensions/message_systems.md) for architectures with caching, batching, and pub/sub optimizations for Kafka/RabbitMQ clones.
+**Not suitable for**: Per-message routing in high-throughput systems (>100K msg/sec). See [docs/extensions/](docs/extensions/) for distributed backends and caching patterns.
+
+**Backend flexibility**: Different backends offer different trade-offs:
+- **ETS** — Local-only, ultra-fast, no persistence
+- **RA/Khepri** — Distributed, replicated, fault-tolerant (planned extensions)
 
 ## Testing
 
 All features are thoroughly tested:
 
 ```bash
-make ct        # Run Common Test suite (71/71 passing)
+make ct        # Run Common Test suite (85/85 passing)
 make clean     # Clean build artifacts
 make erl       # Start Erlang shell with orka loaded
 ```
@@ -128,13 +141,26 @@ Test coverage includes:
 - Await/subscribe coordination
 - Batch operations
 - Concurrent subscribers
+- Backend implementations (ETS, store abstraction)
+- Property-based testing
+- Scope isolation (local/global)
+- Concurrency and regression tests
 
-See `test/orka_SUITE.erl` for implementations.
+Tests are organized in 9 test suites:
+- `orka_SUITE.erl` — Core functionality (57 tests)
+- `orka_app_SUITE.erl` — Application startup (5 tests)
+- `orka_concurrency_SUITE.erl` — Concurrent operations (2 tests)
+- `orka_extra_SUITE.erl` — Extended features (4 tests)
+- `orka_gpt_regression_SUITE.erl` — Regression tests (3 tests)
+- `orka_issue_regression_SUITE.erl` — Issue regression tests (3 tests)
+- `orka_property_SUITE.erl` — Property-based tests (2 tests)
+- `orka_scope_SUITE.erl` — Scope isolation tests (3 tests)
+- `orka_store_SUITE.erl` — Store backend tests (7 tests)
 
 ## Design Principles
 
-**1. Lock-Free Reads**  
-All lookup operations use public ETS tables without locking.
+**1. Backend-Specific Reads**  
+Lookup operations go through the configured store backend (ETS by default).
 
 **2. Automatic Cleanup**  
 Process crashes are detected via monitors and entries are automatically removed.
@@ -144,8 +170,8 @@ Process crashes are detected via monitors and entries are automatically removed.
 - **Tags** — For categorization: `online`, `critical`, `translator`
 - **Properties** — For rich attributes: `region: "us-west"`, `capacity: 100`
 
-**4. Local-Only**  
-Orka handles single-node registries. For distributed systems, see [Orka + Syn patterns](docs/extensions/orka_syn.md).
+**4. Pluggable Backends**  
+Orka's core is backend-agnostic. The default ETS backend handles single-node registries. Extensions can provide distributed backends (RA, Khepri, etc.) for cluster-wide registries. See [docs/extensions/](docs/extensions/) for planned backend options.
 
 ## Key Patterns
 
@@ -219,7 +245,9 @@ See **[docs/comparison.md](docs/comparison.md)** for detailed comparison.
 - `register/2,3` — Register a process
 - `register_with/3` — Atomically start and register
 - `register_single/2,3` — Singleton constraint
-- `lookup/1` — Fast key lookup
+- `lookup/1` — Fast key lookup (no liveness check)
+- `lookup_dirty/1` — Lock-free ETS lookup (no liveness check)
+- `lookup_alive/1` — Key lookup with liveness check
 - `lookup_all/0` — Get all entries
 - `unregister/1` — Remove entry
 

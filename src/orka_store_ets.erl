@@ -6,7 +6,7 @@
 -compile({parse_transform, ms_transform}).
 
 -export([init/1, terminate/2]).
--export([get/2, put/4, del/2]).
+-export([get/2, put/4, del/2, lookup_dirty/2]).
 -export([select_by_type/2, select_by_tag/2,
          select_by_property/3, select_by_property/4]).
 -export([count_by_type/2, count_by_tag/2, count_by_property/3,
@@ -26,9 +26,9 @@
 
 init(Opts) ->
     {RegName, TagName, PropName} = table_names(maps:get(table_prefix, Opts, undefined)),
-    Reg = ensure_table(RegName, [set, private, named_table]),
-    Tag = ensure_table(TagName,  [bag, private, named_table]),
-    Prop= ensure_table(PropName, [bag, private, named_table]),
+    Reg = ensure_table(RegName, [set, protected, named_table]),
+    Tag = ensure_table(TagName,  [bag, protected, named_table]),
+    Prop= ensure_table(PropName, [bag, protected, named_table]),
     {ok, #store{reg_tab=Reg, tag_tab=Tag, prop_tab=Prop}}.
 
 terminate(_Reason, _Store) ->
@@ -36,6 +36,17 @@ terminate(_Reason, _Store) ->
 
 get(Key, #store{reg_tab=Reg}) ->
     case ets:lookup(Reg, Key) of
+        [Entry] -> {ok, Entry};
+        [] -> not_found
+    end.
+
+lookup_dirty(Key, Opts) ->
+    SafeOpts = case is_map(Opts) of
+        true -> Opts;
+        false -> maps:from_list(Opts)
+    end,
+    {RegName, _TagName, _PropName} = table_names(maps:get(table_prefix, SafeOpts, undefined)),
+    case ets:lookup(RegName, Key) of
         [Entry] -> {ok, Entry};
         [] -> not_found
     end.
