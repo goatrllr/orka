@@ -876,21 +876,37 @@ handle_call({register, Key, Pid, Metadata}, _From, State=#orka_state{pid_singlet
 	case maps:get(Pid, PidSingleton, undefined) of
 		undefined ->
 			case StoreMod:get(Key, Store) of
-				not_found ->
-					do_register(Key, Pid, Metadata, Scope, State);
+			not_found ->
+				case normalize_meta(Metadata) of
+					{ok, Normalized} ->
+						do_register(Key, Pid, Normalized, Scope, State);
+					{error, Reason} ->
+						{reply, {error, Reason}, State}
+				end;
 				{ok, {Key, ExistingPid, _ExistingMetadata} = Entry} ->
 					case is_process_alive(ExistingPid) of
 						true ->
 							{reply, {ok, Entry}, State};
-						false ->
-							NewState = remove_dead_pid_entries(ExistingPid, State),
-							do_register(Key, Pid, Metadata, Scope, NewState)
+					false ->
+						NewState = remove_dead_pid_entries(ExistingPid, State),
+						case normalize_meta(Metadata) of
+							{ok, Normalized} ->
+								do_register(Key, Pid, Normalized, Scope, NewState);
+							{error, Reason} ->
+								{reply, {error, Reason}, State}
+						end
 					end
 			end;
 		ExistingKey when ExistingKey =:= Key ->
 			case StoreMod:get(Key, Store) of
 				{ok, Entry} -> {reply, {ok, Entry}, State};
-				not_found -> do_register(Key, Pid, Metadata, Scope, State)
+			not_found ->
+				case normalize_meta(Metadata) of
+					{ok, Normalized} ->
+						do_register(Key, Pid, Normalized, Scope, State);
+					{error, Reason} ->
+						{reply, {error, Reason}, State}
+				end
 			end;
 		ExistingKey ->
 			{reply, {error, {already_registered_under_key, ExistingKey}}, State}
@@ -973,17 +989,32 @@ handle_call({entries_by_type, Type, Scope}, _From, State) when Scope =:= local; 
 	{reply, StoreMod:select_by_type(Type, Store), State};
 
 handle_call({entries_by_tag, Tag, all}, _From, State) ->
-	{LocalMod, LocalStore} = orka_scope:get_store(local, State),
-	{GlobalMod, GlobalStore} = orka_scope:get_store(global, State),
-	LocalEntries = LocalMod:select_by_tag(Tag, LocalStore),
-	GlobalEntries = GlobalMod:select_by_tag(Tag, GlobalStore),
-	{reply, LocalEntries ++ GlobalEntries, State};
+	case normalize_tag(Tag) of
+		{ok, Tag1} ->
+			{LocalMod, LocalStore} = orka_scope:get_store(local, State),
+			{GlobalMod, GlobalStore} = orka_scope:get_store(global, State),
+			LocalEntries = LocalMod:select_by_tag(Tag1, LocalStore),
+			GlobalEntries = GlobalMod:select_by_tag(Tag1, GlobalStore),
+			{reply, LocalEntries ++ GlobalEntries, State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 handle_call({entries_by_tag, Tag, Scope}, _From, State) when Scope =:= local; Scope =:= global ->
-	{StoreMod, Store} = orka_scope:get_store(Scope, State),
-	{reply, StoreMod:select_by_tag(Tag, Store), State};
+	case normalize_tag(Tag) of
+		{ok, Tag1} ->
+			{StoreMod, Store} = orka_scope:get_store(Scope, State),
+			{reply, StoreMod:select_by_tag(Tag1, Store), State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 handle_call({entries_by_tag, Tag}, _From, State) ->
-	{StoreMod, Store} = orka_scope:get_store(local, State),
-	{reply, StoreMod:select_by_tag(Tag, Store), State};
+	case normalize_tag(Tag) of
+		{ok, Tag1} ->
+			{StoreMod, Store} = orka_scope:get_store(local, State),
+			{reply, StoreMod:select_by_tag(Tag1, Store), State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 
 handle_call({count_by_type, Type}, _From, State) ->
 	{StoreMod, Store} = orka_scope:get_store(local, State),
@@ -999,59 +1030,124 @@ handle_call({count_by_type, Type, Scope}, _From, State) when Scope =:= local; Sc
 	{reply, StoreMod:count_by_type(Type, Store), State};
 
 handle_call({count_by_tag, Tag}, _From, State) ->
-	{StoreMod, Store} = orka_scope:get_store(local, State),
-	{reply, StoreMod:count_by_tag(Tag, Store), State};
+	case normalize_tag(Tag) of
+		{ok, Tag1} ->
+			{StoreMod, Store} = orka_scope:get_store(local, State),
+			{reply, StoreMod:count_by_tag(Tag1, Store), State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 handle_call({count_by_tag, Tag, all}, _From, State) ->
-	{LocalMod, LocalStore} = orka_scope:get_store(local, State),
-	{GlobalMod, GlobalStore} = orka_scope:get_store(global, State),
-	LocalCount = LocalMod:count_by_tag(Tag, LocalStore),
-	GlobalCount = GlobalMod:count_by_tag(Tag, GlobalStore),
-	{reply, LocalCount + GlobalCount, State};
+	case normalize_tag(Tag) of
+		{ok, Tag1} ->
+			{LocalMod, LocalStore} = orka_scope:get_store(local, State),
+			{GlobalMod, GlobalStore} = orka_scope:get_store(global, State),
+			LocalCount = LocalMod:count_by_tag(Tag1, LocalStore),
+			GlobalCount = GlobalMod:count_by_tag(Tag1, GlobalStore),
+			{reply, LocalCount + GlobalCount, State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 handle_call({count_by_tag, Tag, Scope}, _From, State) when Scope =:= local; Scope =:= global ->
-	{StoreMod, Store} = orka_scope:get_store(Scope, State),
-	{reply, StoreMod:count_by_tag(Tag, Store), State};
+	case normalize_tag(Tag) of
+		{ok, Tag1} ->
+			{StoreMod, Store} = orka_scope:get_store(Scope, State),
+			{reply, StoreMod:count_by_tag(Tag1, Store), State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 
 handle_call({find_by_property, Prop, Value}, _From, State) ->
-	{StoreMod, Store} = orka_scope:get_store(local, State),
-	{reply, StoreMod:select_by_property(Prop, Value, Store), State};
+	case normalize_prop_query(Prop, Value) of
+		{ok, {Prop1, Value1}} ->
+			{StoreMod, Store} = orka_scope:get_store(local, State),
+			{reply, StoreMod:select_by_property(Prop1, Value1, Store), State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 handle_call({find_by_property, Type, Prop, Value}, _From, State) ->
-	{StoreMod, Store} = orka_scope:get_store(local, State),
-	{reply, StoreMod:select_by_property(Type, Prop, Value, Store), State};
+	case normalize_prop_query(Prop, Value) of
+		{ok, {Prop1, Value1}} ->
+			{StoreMod, Store} = orka_scope:get_store(local, State),
+			{reply, StoreMod:select_by_property(Type, Prop1, Value1, Store), State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 handle_call({find_by_property, Type, Prop, Value, all}, _From, State) ->
-	{LocalMod, LocalStore} = orka_scope:get_store(local, State),
-	{GlobalMod, GlobalStore} = orka_scope:get_store(global, State),
-	LocalEntries = LocalMod:select_by_property(Type, Prop, Value, LocalStore),
-	GlobalEntries = GlobalMod:select_by_property(Type, Prop, Value, GlobalStore),
-	{reply, LocalEntries ++ GlobalEntries, State};
+	case normalize_prop_query(Prop, Value) of
+		{ok, {Prop1, Value1}} ->
+			{LocalMod, LocalStore} = orka_scope:get_store(local, State),
+			{GlobalMod, GlobalStore} = orka_scope:get_store(global, State),
+			LocalEntries = LocalMod:select_by_property(Type, Prop1, Value1, LocalStore),
+			GlobalEntries = GlobalMod:select_by_property(Type, Prop1, Value1, GlobalStore),
+			{reply, LocalEntries ++ GlobalEntries, State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 handle_call({find_by_property, Type, Prop, Value, Scope}, _From, State) when Scope =:= local; Scope =:= global ->
-	{StoreMod, Store} = orka_scope:get_store(Scope, State),
-	{reply, StoreMod:select_by_property(Type, Prop, Value, Store), State};
+	case normalize_prop_query(Prop, Value) of
+		{ok, {Prop1, Value1}} ->
+			{StoreMod, Store} = orka_scope:get_store(Scope, State),
+			{reply, StoreMod:select_by_property(Type, Prop1, Value1, Store), State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 
 handle_call({count_by_property, Prop, Value}, _From, State) ->
-	{StoreMod, Store} = orka_scope:get_store(local, State),
-	{reply, StoreMod:count_by_property(Prop, Value, Store), State};
+	case normalize_prop_query(Prop, Value) of
+		{ok, {Prop1, Value1}} ->
+			{StoreMod, Store} = orka_scope:get_store(local, State),
+			{reply, StoreMod:count_by_property(Prop1, Value1, Store), State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 handle_call({count_by_property, Prop, Value, all}, _From, State) ->
-	{LocalMod, LocalStore} = orka_scope:get_store(local, State),
-	{GlobalMod, GlobalStore} = orka_scope:get_store(global, State),
-	LocalCount = LocalMod:count_by_property(Prop, Value, LocalStore),
-	GlobalCount = GlobalMod:count_by_property(Prop, Value, GlobalStore),
-	{reply, LocalCount + GlobalCount, State};
+	case normalize_prop_query(Prop, Value) of
+		{ok, {Prop1, Value1}} ->
+			{LocalMod, LocalStore} = orka_scope:get_store(local, State),
+			{GlobalMod, GlobalStore} = orka_scope:get_store(global, State),
+			LocalCount = LocalMod:count_by_property(Prop1, Value1, LocalStore),
+			GlobalCount = GlobalMod:count_by_property(Prop1, Value1, GlobalStore),
+			{reply, LocalCount + GlobalCount, State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 handle_call({count_by_property, Prop, Value, Scope}, _From, State) when Scope =:= local; Scope =:= global ->
-	{StoreMod, Store} = orka_scope:get_store(Scope, State),
-	{reply, StoreMod:count_by_property(Prop, Value, Store), State};
+	case normalize_prop_query(Prop, Value) of
+		{ok, {Prop1, Value1}} ->
+			{StoreMod, Store} = orka_scope:get_store(Scope, State),
+			{reply, StoreMod:count_by_property(Prop1, Value1, Store), State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 
 handle_call({property_stats, Type, Prop}, _From, State) ->
-	{StoreMod, Store} = orka_scope:get_store(local, State),
-	{reply, StoreMod:property_stats(Type, Prop, Store), State};
+	case normalize_prop_key(Prop) of
+		{ok, Prop1} ->
+			{StoreMod, Store} = orka_scope:get_store(local, State),
+			{reply, StoreMod:property_stats(Type, Prop1, Store), State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 handle_call({property_stats, Type, Prop, all}, _From, State) ->
-	{LocalMod, LocalStore} = orka_scope:get_store(local, State),
-	{GlobalMod, GlobalStore} = orka_scope:get_store(global, State),
-	LocalStats = LocalMod:property_stats(Type, Prop, LocalStore),
-	GlobalStats = GlobalMod:property_stats(Type, Prop, GlobalStore),
-	{reply, merge_count_maps(LocalStats, GlobalStats), State};
+	case normalize_prop_key(Prop) of
+		{ok, Prop1} ->
+			{LocalMod, LocalStore} = orka_scope:get_store(local, State),
+			{GlobalMod, GlobalStore} = orka_scope:get_store(global, State),
+			LocalStats = LocalMod:property_stats(Type, Prop1, LocalStore),
+			GlobalStats = GlobalMod:property_stats(Type, Prop1, GlobalStore),
+			{reply, merge_count_maps(LocalStats, GlobalStats), State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 handle_call({property_stats, Type, Prop, Scope}, _From, State) when Scope =:= local; Scope =:= global ->
-	{StoreMod, Store} = orka_scope:get_store(Scope, State),
-	{reply, StoreMod:property_stats(Type, Prop, Store), State};
+	case normalize_prop_key(Prop) of
+		{ok, Prop1} ->
+			{StoreMod, Store} = orka_scope:get_store(Scope, State),
+			{reply, StoreMod:property_stats(Type, Prop1, Store), State};
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
 
 %% @doc Handle adding a tag
 handle_call({add_tag, Key, Tag}, _From, State) ->
@@ -1064,13 +1160,18 @@ handle_call({add_tag, Key, Tag}, _From, State) ->
 					%% Tag already exists
 					% {reply, {error, tag_already_exists}, State};
 					{reply, ok, State};
-				false ->
-					%% Add tag to metadata
-					NewTags = [Tag | Tags],
-					NewMetadata = maps:put(tags, NewTags, Metadata),
-					{ok, _Entry, Store1} = StoreMod:put(Key, Pid, NewMetadata, Store),
-					State1 = put_store(Scope, {StoreMod, Store1}, State),
-					{reply, ok, State1}
+			false ->
+				%% Add tag to metadata
+				NewTags = [Tag | Tags],
+				NewMetadata = maps:put(tags, NewTags, Metadata),
+				case normalize_meta(NewMetadata) of
+					{ok, Normalized} ->
+						{ok, _Entry, Store1} = StoreMod:put(Key, Pid, Normalized, Store),
+						State1 = put_store(Scope, {StoreMod, Store1}, State),
+						{reply, ok, State1};
+					{error, Reason} ->
+						{reply, {error, Reason}, State}
+				end
 			end;
 		not_found ->
 			{reply, not_found, State}
@@ -1118,12 +1219,23 @@ handle_call({register_property, Key, Pid, PropName, PropValue}, _From, State) ->
 	case StoreMod:get(Key, Store) of
 		{ok, {Key, RegisteredPid, Metadata}} when RegisteredPid =:= Pid ->
 			%% Key exists and Pid matches, update metadata and index
-			Props0 = maps:get(properties, Metadata, #{}),
-			NewProps = maps:put(PropName, PropValue, Props0),
-			UpdatedMetadata = maps:put(properties, NewProps, Metadata),
-			{ok, _Entry, Store1} = StoreMod:put(Key, Pid, UpdatedMetadata, Store),
-			State1 = put_store(Scope, {StoreMod, Store1}, State),
-			{reply, ok, State1};
+			case normalize_prop_query(PropName, PropValue) of
+				{ok, {PropKey, PropVal}} ->
+					Props0 = maps:get(properties, Metadata, #{}),
+					Props1 = maps:remove(PropKey, Props0),
+					NewProps = maps:put(PropKey, PropVal, Props1),
+					UpdatedMetadata = maps:put(properties, NewProps, Metadata),
+					case normalize_meta(UpdatedMetadata) of
+						{ok, Normalized} ->
+							{ok, _Entry, Store1} = StoreMod:put(Key, Pid, Normalized, Store),
+							State1 = put_store(Scope, {StoreMod, Store1}, State),
+							{reply, ok, State1};
+						{error, Reason} ->
+							{reply, {error, Reason}, State}
+					end;
+				{error, Reason} ->
+					{reply, {error, Reason}, State}
+			end;
 		not_found ->
 			%% Key not found
 			{reply, not_found, State};
@@ -1313,6 +1425,36 @@ store_for_key(Key, State) ->
 
 put_store(Scope, Store, State) ->
 	orka_scope:put_store(Scope, Store, State).
+
+meta_opts() ->
+	Opts = application:get_env(orka, meta_opts, #{}),
+	case is_map(Opts) of
+		true -> orka_meta_policy:merge_opts(Opts);
+		false -> orka_meta_policy:merge_opts(#{})
+	end.
+
+normalize_meta(Meta) ->
+	orka_meta:normalize(Meta, meta_opts()).
+
+normalize_tag(Tag) ->
+	orka_meta:normalize_tag(Tag, meta_opts()).
+
+normalize_prop_key(Key) ->
+	orka_meta:normalize_prop_key(Key, meta_opts()).
+
+normalize_prop_val(Val) ->
+	orka_meta:normalize_prop_val(Val, meta_opts()).
+
+normalize_prop_query(Key, Val) ->
+	case normalize_prop_key(Key) of
+		{ok, Key1} ->
+			case normalize_prop_val(Val) of
+				{ok, Val1} -> {ok, {Key1, Val1}};
+				{error, Reason} -> {error, Reason}
+			end;
+		{error, Reason} ->
+			{error, Reason}
+	end.
 
 merge_count_maps(Base, Add) ->
 	maps:fold(fun(Key, Value, Acc) ->

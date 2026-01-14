@@ -101,11 +101,12 @@ test_registry_available_after_start(Config) ->
 	Key = test_key,
 	Pid = self(),
 	Metadata = #{test => true},
+	{ok, ExpectedMeta} = orka_meta:normalize(Metadata, #{}),
 
-	{ok, {Key, Pid, Metadata}} = orka:register(Key, Pid, Metadata),
+	{ok, {Key, Pid, ExpectedMeta}} = orka:register(Key, Pid, Metadata),
 
 	%% Verify we can look it up
-	{ok, {Key, Pid, Metadata}} = orka:lookup(Key),
+	{ok, {Key, Pid, ExpectedMeta}} = orka:lookup(Key),
 
 	ct:log("✓ Registry is fully operational after start"),
 	Config.

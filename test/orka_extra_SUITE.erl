@@ -101,7 +101,7 @@ test_property_stats_uses_property_name(Config) ->
 	ok = orka:register_property(Key3, Pid3, #{property => region, value => "us-east"}),
 
 	Stats = orka:property_stats(service, region),
-	#{"us-west" := 2, "us-east" := 1} = Stats,
+	#{<<"us-west">> := 2, <<"us-east">> := 1} = Stats,
 
 	ct:log("✓ property_stats/2 counts by property name"),
 	Config.
@@ -129,11 +129,19 @@ test_register_single_returns_existing(Config) ->
 	Key = {global, service, singleton_meta},
 	Meta1 = #{tags => [service], version => 1},
 	Meta2 = #{tags => [service, updated], version => 2},
+	ExpectedMeta1 = normalize_tags_only(Meta1),
 
-	{ok, {Key, Pid, Meta1}} = orka:register_single(Key, Meta1),
-	{ok, {Key, Pid, Meta1}} = orka:register_single(Key, Pid, Meta2),
+	{ok, {Key, Pid, ExpectedMeta1}} = orka:register_single(Key, Meta1),
+	{ok, {Key, Pid, ExpectedMeta1}} = orka:register_single(Key, Pid, Meta2),
 
-	{ok, {Key, Pid, Meta1}} = orka:lookup(Key),
+	{ok, {Key, Pid, ExpectedMeta1}} = orka:lookup(Key),
 
 	ct:log("✓ register_single/3 returns existing entry on idempotent call"),
 	Config.
+
+normalize_tags_only(Metadata) ->
+	case maps:get(tags, Metadata, undefined) of
+		undefined -> Metadata;
+		Tags when is_list(Tags) -> maps:put(tags, lists:usort(Tags), Metadata);
+		_ -> Metadata
+	end.

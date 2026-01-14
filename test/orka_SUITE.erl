@@ -162,10 +162,11 @@ test_register_and_lookup(Config) ->
 	Key = {global, user1, service_a},
 	Pid = spawn(fun() -> timer:sleep(10000) end),
 	Metadata = #{status => active, version => 1},
+	ExpectedMeta = normalize_tags(Metadata),
 
 	{ok, _} = orka:register(Key, Pid, Metadata),
 
-	{ok, {Key, Pid, Metadata}} = orka:lookup(Key),
+	{ok, {Key, Pid, ExpectedMeta}} = orka:lookup(Key),
 
 	ct:log("✓ Successfully registered and looked up entry"),
 	Config.
@@ -175,9 +176,10 @@ test_lookup_dirty(Config) ->
 	Key = {global, user_dirty, service_x},
 	Pid = spawn(fun() -> timer:sleep(10000) end),
 	Metadata = #{dirty => true},
+	ExpectedMeta = normalize_tags(Metadata),
 
 	{ok, _} = orka:register(Key, Pid, Metadata),
-	{ok, {Key, Pid, Metadata}} = orka:lookup_dirty(Key),
+	{ok, {Key, Pid, ExpectedMeta}} = orka:lookup_dirty(Key),
 	Config.
 
 %% @doc Test register/3 invalid input returns badarg
@@ -192,10 +194,11 @@ test_register_with_pid(Config) ->
 	Key = {global, user2, service_b},
 	Pid = spawn(fun() -> timer:sleep(10000) end),
 	Metadata = #{role => worker},
+	ExpectedMeta = normalize_tags(Metadata),
 
 	{ok, _} = orka:register(Key, Pid, Metadata),
 
-	{ok, {Key, Pid, Metadata}} = orka:lookup(Key),
+	{ok, {Key, Pid, ExpectedMeta}} = orka:lookup(Key),
 
 	ct:log("✓ Supervisor-style registration works"),
 	Config.
@@ -204,11 +207,12 @@ test_register_with_pid(Config) ->
 test_self_register(Config) ->
 	Key = {global, user3, service_c},
 	Metadata = #{auto_register => true},
+	ExpectedMeta = normalize_tags(Metadata),
 
-	{ok, {Key, Self, Metadata}} = orka:register(Key, Metadata),
+	{ok, {Key, Self, ExpectedMeta}} = orka:register(Key, Metadata),
 	Self = self(),
 
-	{ok, {Key, Self, Metadata}} = orka:lookup(Key),
+	{ok, {Key, Self, ExpectedMeta}} = orka:lookup(Key),
 	Self = self(),
 
 	ct:log("✓ Self-registration works"),
@@ -282,13 +286,16 @@ test_lookup_all(Config) ->
 	{ok, _} = orka:register(Key1, Pid1, #{id => 1}),
 	{ok, _} = orka:register(Key2, Pid2, #{id => 2}),
 	{ok, _} = orka:register(Key3, Pid3, #{id => 3}),
+	{ok, ExpectedMeta1} = orka_meta:normalize(#{id => 1}, #{}),
+	{ok, ExpectedMeta2} = orka_meta:normalize(#{id => 2}, #{}),
+	{ok, ExpectedMeta3} = orka_meta:normalize(#{id => 3}, #{}),
 
 	AllEntries = orka:lookup_all(),
 
 	3 = length(AllEntries),
-	true = lists:member({Key1, Pid1, #{id => 1}}, AllEntries),
-	true = lists:member({Key2, Pid2, #{id => 2}}, AllEntries),
-	true = lists:member({Key3, Pid3, #{id => 3}}, AllEntries),
+	true = lists:member({Key1, Pid1, ExpectedMeta1}, AllEntries),
+	true = lists:member({Key2, Pid2, ExpectedMeta2}, AllEntries),
+	true = lists:member({Key3, Pid3, ExpectedMeta3}, AllEntries),
 
 	ct:log("✓ lookup_all returns all registered entries"),
 	Config.
@@ -298,9 +305,10 @@ test_process_cleanup_on_exit(Config) ->
 	Key = {global, user5, service_e},
 	Pid = spawn(fun() -> timer:sleep(50) end),
 	Metadata = #{cleanup_test => true},
+	ExpectedMeta = normalize_tags(Metadata),
 
 	{ok, _} = orka:register(Key, Pid, Metadata),
-	{ok, {Key, Pid, Metadata}} = orka:lookup(Key),
+	{ok, {Key, Pid, ExpectedMeta}} = orka:lookup(Key),
 
 	%% Wait for process to exit
 	timer:sleep(200),
@@ -349,10 +357,11 @@ test_nested_keys(Config) ->
 
 	Pid = spawn(fun() -> timer:sleep(10000) end),
 	Metadata = #{language => french},
+	ExpectedMeta = normalize_tags(Metadata),
 
 	{ok, _} = orka:register(Key, Pid, Metadata),
 
-	{ok, {Key, Pid, Metadata}} = orka:lookup(Key),
+	{ok, {Key, Pid, ExpectedMeta}} = orka:lookup(Key),
 
 	ct:log("✓ Nested keys work correctly"),
 	Config.
@@ -391,12 +400,13 @@ test_metadata_preservation(Config) ->
 		atom => ok,
 		tuple => {x, y, z}
 	},
+	ExpectedMeta = normalize_tags(Metadata),
 
 	{ok, _} = orka:register(Key, Pid, Metadata),
 
 	{ok, {Key, Pid, RetrievedMetadata}} = orka:lookup(Key),
 
-	Metadata = RetrievedMetadata,
+	ExpectedMeta = RetrievedMetadata,
 
 	ct:log("✓ Complex metadata types preserved correctly"),
 	Config.
@@ -413,7 +423,8 @@ test_add_tag_idempotent(Config) ->
 
 	{ok, {Key, _Pid, LookupMeta}} = orka:lookup(Key),
 	Tags = maps:get(tags, LookupMeta, []),
-	1 = length([Tag || Tag <- Tags, Tag =:= critical]),
+	ExpectedTag = normalize_tag(critical),
+	1 = length([Tag || Tag <- Tags, Tag =:= ExpectedTag]),
 
 	Entries = orka:entries_by_tag(critical),
 	1 = length(Entries),
@@ -967,6 +978,7 @@ test_unsubscribe(Config) ->
 test_concurrent_subscribers(Config) ->
 	Key = {global, service, shared_resource},
 	Metadata = #{tags => [service, shared]},
+	ExpectedMeta = normalize_tags(Metadata),
 	
 	%% Have multiple subscribers
 	Sub1 = spawn(fun() ->
@@ -996,7 +1008,7 @@ test_concurrent_subscribers(Config) ->
 	wait_for_pids([Sub1, Sub2, Sub3], 3000),
 	
 	%% Verify the registered entry has the expected structure
-	{Key, _RegistrarPid, Metadata} = RegisteredEntry,
+	{Key, _RegistrarPid, ExpectedMeta} = RegisteredEntry,
 	
 	ct:log("✓ Multiple subscribers all receive notification"),
 	Config.
@@ -1014,6 +1026,9 @@ test_register_batch_basic(Config) ->
 	Meta1 = #{tags => [portfolio, user], properties => #{strategy => momentum}},
 	Meta2 = #{tags => [technical, user], properties => #{indicators => [rsi]}},
 	Meta3 = #{tags => [orders, user], properties => #{queue => 100}},
+	ExpectedMeta1 = normalize_tags_only(Meta1),
+	ExpectedMeta2 = normalize_tags_only(Meta2),
+	ExpectedMeta3 = normalize_tags_only(Meta3),
 	
 	%% Register 3 services for user in one call
 	{ok, Entries} = orka:register_batch([
@@ -1026,9 +1041,9 @@ test_register_batch_basic(Config) ->
 	3 = length(Entries),
 	
 	%% Each should be found
-	{ok, {Key1, P1, Meta1}} = orka:lookup(Key1),
-	{ok, {Key2, P2, Meta2}} = orka:lookup(Key2),
-	{ok, {Key3, P3, Meta3}} = orka:lookup(Key3),
+	{ok, {Key1, P1, ExpectedMeta1}} = orka:lookup(Key1),
+	{ok, {Key2, P2, ExpectedMeta2}} = orka:lookup(Key2),
+	{ok, {Key3, P3, ExpectedMeta3}} = orka:lookup(Key3),
 	
 	ct:log("✓ Batch registration with explicit pids works"),
 	Config.
@@ -1201,10 +1216,22 @@ receive_timeout(Timeout) ->
 	end.
 
 normalize_tags(Metadata) ->
+	case orka_meta:normalize(Metadata, #{}) of
+		{ok, Meta1} -> Meta1;
+		{error, _} -> Metadata
+	end.
+
+normalize_tags_only(Metadata) ->
 	case maps:get(tags, Metadata, undefined) of
 		undefined -> Metadata;
 		Tags when is_list(Tags) -> maps:put(tags, lists:usort(Tags), Metadata);
 		_ -> Metadata
+	end.
+
+normalize_tag(Tag) ->
+	case orka_meta:normalize_tag(Tag, orka_meta_policy:merge_opts(#{})) of
+		{ok, Tag1} -> Tag1;
+		{error, _} -> Tag
 	end.
 
 get_monitors() ->

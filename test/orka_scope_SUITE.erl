@@ -112,9 +112,9 @@ test_scope_counts_and_property_stats(Config) ->
     1 = orka:count_by_type(service, global),
     2 = orka:count_by_type(service, all),
 
-    #{us := 1} = orka:property_stats(service, region),
-    #{us := 1} = orka:property_stats(service, region, global),
-    #{us := 2} = orka:property_stats(service, region, all),
+    #{<<"us">> := 1} = orka:property_stats(service, region),
+    #{<<"us">> := 1} = orka:property_stats(service, region, global),
+    #{<<"us">> := 2} = orka:property_stats(service, region, all),
 
     GlobalEntries = orka:find_by_property(service, region, us, global),
     true = has_key(GlobalKey, GlobalEntries),

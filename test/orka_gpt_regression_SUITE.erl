@@ -71,7 +71,7 @@ test_property_stats_filters_by_type(Config) ->
 
 	%% Expect only services to be counted; actual code returns 3 because it ignores the filter.
 	StatsForServices = orka:property_stats(service, status),
-	2 = maps:get(healthy, StatsForServices),
+	2 = maps:get(<<"healthy">>, StatsForServices),
 	Config.
 
 %% @doc Re-registering the same property should replace the previous value; current code accumulates both values in the index.
