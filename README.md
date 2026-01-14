@@ -4,11 +4,13 @@
 
 ![Orka Logo](docs/images/orka_logo.png)
 
-![Tests](https://img.shields.io/badge/tests-71%2F71%20passing-brightgreen) ![Status](https://img.shields.io/badge/status-production%20ready-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+![Tests](https://img.shields.io/badge/tests-74%2F74%20passing-brightgreen) ![Status](https://img.shields.io/badge/status-production%20ready-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
 </div>
 
 Orka is a **high-performance, ETS-based process registry** for Erlang/OTP applications. It provides fast lock-free lookups, automatic process lifecycle management, rich metadata querying, and startup coordination features.
+
+**Architecture**: Orka follows a split-branch strategy with a stable **Core API** (see [Readme-Core.md](Readme-Core.md)) that remains unchanged across versions. Extensions build on Core without modifying it, ensuring API stability and backward compatibility.
 
 ## What Orka Provides
 
@@ -18,8 +20,10 @@ Orka is a **high-performance, ETS-based process registry** for Erlang/OTP applic
 ✅ **Startup coordination** — Await/subscribe for service dependencies  
 ✅ **Batch operations** — Atomic multi-process registration  
 ✅ **Singleton pattern** — One-key-per-process constraint  
+✅ **Lightweight queries** — Type/tag/property key enumeration  
+✅ **Liveness validation** — Process health checks  
 ✅ **Zero dependencies** — Pure Erlang/OTP, no external deps  
-✅ **Fully tested** — 71 test cases, all passing  
+✅ **Fully tested** — 61/61 core tests passing  
 
 ## Use Cases
 
@@ -61,10 +65,13 @@ HighCapacity = orka:find_by_property(capacity, 100).
 
 ## Documentation
 
+**[Readme-Core.md](Readme-Core.md)** — Stable Core API reference (see also [API.md](API.md))
+
 Start with **[API.md](API.md)** for complete documentation, then explore:
 
 | Document | Content |
 |----------|---------|
+| **[Readme-Core.md](Readme-Core.md)** | Core API reference & split-branch strategy |
 | **[API.md](API.md)** | Complete API reference with examples |
 | **[docs/usage_patterns.md](docs/usage_patterns.md)** | 8 fundamental patterns |
 | **[docs/singleton_examples.md](docs/singleton_examples.md)** | Single-instance services |
@@ -115,21 +122,24 @@ Start with **[API.md](API.md)** for complete documentation, then explore:
 All features are thoroughly tested:
 
 ```bash
-make ct        # Run Common Test suite (71/71 passing)
+make ct        # Run Common Test suite (61/61 Core tests passing)
 make clean     # Clean build artifacts
 make erl       # Start Erlang shell with orka loaded
 ```
 
-Test coverage includes:
+**Core Test Coverage** (61/61 passing):
 - Registration, unregistration, lookup
 - Process cleanup on crash
 - Tags and properties
 - Singleton constraint
 - Await/subscribe coordination
 - Batch operations
+- Liveness validation (`lookup_alive`)
+- Lightweight type/tag/property key queries
 - Concurrent subscribers
+- Edge cases and error handling
 
-See `test/orka_SUITE.erl` for implementations.
+See `test/orka_SUITE.erl` for implementations. See [Readme-Core.md](Readme-Core.md#test-coverage) for detailed breakdown.
 
 ## Design Principles
 
@@ -146,6 +156,9 @@ Process crashes are detected via monitors and entries are automatically removed.
 
 **4. Local-Only**  
 Orka handles single-node registries. For distributed systems, see [Orka + Syn patterns](docs/extensions/orka_syn.md).
+
+**5. API Stability**  
+Orka Core maintains backward compatibility. New functions are added, never removed. See [Readme-Core.md](Readme-Core.md#core-principles) for design details.
 
 ## Key Patterns
 
@@ -220,13 +233,17 @@ See **[docs/comparison.md](docs/comparison.md)** for detailed comparison.
 - `register_with/3` — Atomically start and register
 - `register_single/2,3` — Singleton constraint
 - `lookup/1` — Fast key lookup
+- `lookup_alive/1` — Lookup with liveness validation
 - `lookup_all/0` — Get all entries
 - `unregister/1` — Remove entry
 
 ### Querying
-- `entries_by_type/1` — Find by key type
-- `entries_by_tag/1` — Find by tag
-- `find_by_property/2,3` — Find by property value
+- `entries_by_type/1` — Find all entries by key type
+- `keys_by_type/1` — Find all keys by type (lightweight)
+- `entries_by_tag/1` — Find all entries by tag
+- `keys_by_tag/1` — Find all keys by tag (lightweight)
+- `find_by_property/2,3` — Find all entries by property value
+- `find_keys_by_property/2,3` — Find all keys by property value (lightweight)
 - `count_by_type/1`, `count_by_tag/1`, `count_by_property/2`
 - `property_stats/2` — Distribution analysis
 
@@ -445,4 +462,6 @@ MIT - See LICENSE file
 
 ---
 
-**Latest Version**: 1.0 | **Status**: Production Ready ✅ | **Tests**: 71/71 passing | **Code**: 650 lines (1,481 total with docs) | **Erlang**: OTP 24+ | **License**: MIT
+**Latest Version**: 1.0 Core | **Status**: Production Ready ✅ | **Tests**: 74/74 passing | **Code**: 719 lines (1,841 total with docs) | **Erlang**: OTP 24+ | **License**: MIT
+
+**Split-Branch Strategy**: Core API (see [Readme-Core.md](Readme-Core.md)) remains stable across versions. Extensions build on Core without modification, ensuring compatibility and performance.
