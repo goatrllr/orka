@@ -14,7 +14,7 @@
 -export([register_single/2, register_single/3]).
 -export([unregister/1, unregister_batch/1]).
 -export([await/2, subscribe/1, unsubscribe/1]).
--export([lookup/1, lookup_alive/1]).
+-export([lookup/1, lookup_dirty/1,lookup_alive/1]).
 -export([lookup_all/0]).
 -export([add_tag/2, remove_tag/2]).
 -export([update_metadata/2]).
@@ -467,6 +467,10 @@ lookup(Key) ->
 			not_found
 	end.
 
+-spec lookup_dirty(Key) -> {ok, {Key, pid(), map()}} | not_found.
+lookup_dirty(Key) ->
+	lookup(Key).
+	
 %% @doc Lookup a single entry by key with process liveness validation.
 %% 
 %% Performs an ETS lookup and additionally checks if the registered process is still alive.
