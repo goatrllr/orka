@@ -5,7 +5,7 @@
               {mod,{orka_app,[]}},
               {applications,[kernel,stdlib]},
               {env,[]},
-              {modules,[]},
+              {modules,[orka,orka_app,orka_sup]},
               {maintainers,[]},
               {licenses,[]},
               {links,[]}]}.
