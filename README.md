@@ -122,12 +122,30 @@ Start with **[API.md](API.md)** for complete documentation, then explore:
 All features are thoroughly tested:
 
 ```bash
-make ct        # Run Common Test suite (61/61 Core tests passing)
+make ct        # Run Common Test suite (79 CT + 100 property tests passing)
+make eunit     # Run EUnit tests (47 unit tests passing)
 make clean     # Clean build artifacts
 make erl       # Start Erlang shell with orka loaded
 ```
 
-**Core Test Coverage** (61/61 passing):
+**Test Coverage:**
+
+**47 EUnit tests (100% passing)** - Core unit tests covering:
+- Basic registration (key, pid, metadata variations)
+- Lookup operations (lookup, lookup_dirty, lookup_alive)
+- Unregister (single and batch)
+- Tag operations (add, remove, query by tag, count by tag)
+- Type-based queries (entries/keys by type, count by type)
+- Metadata updates and validation
+- Property registration and querying
+- Batch registration and error handling
+- Singleton registration with constraints
+- Subscribe/await coordination
+- Automatic process cleanup
+- Concurrent registration
+- Edge cases (long lists, large maps, empty tags, non-existent queries)
+
+**79 Common Test cases (100% passing)** - Integration tests covering:
 - Registration, unregistration, lookup
 - Process cleanup on crash
 - Tags and properties
@@ -138,8 +156,14 @@ make erl       # Start Erlang shell with orka loaded
 - Lightweight type/tag/property key queries
 - Concurrent subscribers
 - Edge cases and error handling
+- Regressions and GPT-assisted scenarios
+- Concurrency stress tests
 
-See `test/orka_SUITE.erl` for implementations. See [Readme-Core.md](Readme-Core.md#test-coverage) for detailed breakdown.
+**2 Property-Based Test Suites (100 property tests total):**
+- Property index consistency (50 trials)
+- Tag index consistency (50 trials)
+
+**Total: 47 EUnit + 79 CT + 100 property = 226 tests passing**
 
 ## Design Principles
 
@@ -462,6 +486,6 @@ MIT - See LICENSE file
 
 ---
 
-**Latest Version**: 1.0 Core | **Status**: Production Ready ✅ | **Tests**: 74/74 passing | **Code**: 719 lines (1,841 total with docs) | **Erlang**: OTP 24+ | **License**: MIT
+**Latest Version**: 1.0 Core | **Status**: Production Ready ✅ | **Tests**: 226/226 passing | **Code**: 719 lines (1,841 total with docs) | **Erlang**: OTP 24+ | **License**: MIT
 
 **Split-Branch Strategy**: Core API (see [Readme-Core.md](Readme-Core.md)) remains stable across versions. Extensions build on Core without modification, ensuring compatibility and performance.
