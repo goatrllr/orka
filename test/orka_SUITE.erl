@@ -12,6 +12,8 @@
 	test_register_with_pid/1,
 	test_self_register/1,
 	test_lookup_not_found/1,
+	test_lookup_alive/1,
+	test_lookup_alive_dead_pid/1,
 	test_unregister/1,
 	test_unregister_not_found/1,
 	test_unregister_batch/1,
@@ -34,8 +36,12 @@
 	test_find_by_property_not_found/1,
 	test_count_by_property_not_found/1,
 	test_entries_by_tag_not_found/1,
+	test_keys_by_tag/1,
+	test_keys_by_tag_not_found/1,
 	test_count_by_tag_not_found/1,
 	test_entries_by_type_not_found/1,
+	test_keys_by_type/1,
+	test_keys_by_type_not_found/1,
 	test_register_with/1,
 	test_register_with_existing_returns_entry/1,
 	test_register_with_failure/1,
@@ -78,6 +84,8 @@ all() ->
 		test_register_with_pid,
 		test_self_register,
 		test_lookup_not_found,
+		test_lookup_alive,
+		test_lookup_alive_dead_pid,
 		test_unregister,
 		test_unregister_not_found,
 		test_unregister_batch,
@@ -100,8 +108,12 @@ all() ->
 		test_find_by_property_not_found,
 		test_count_by_property_not_found,
 		test_entries_by_tag_not_found,
+		test_keys_by_tag,
+		test_keys_by_tag_not_found,
 		test_count_by_tag_not_found,
 		test_entries_by_type_not_found,
+		test_keys_by_type,
+		test_keys_by_type_not_found,
 		test_register_with,
 		test_register_with_existing_returns_entry,
 		test_register_with_failure,
@@ -225,6 +237,41 @@ test_lookup_not_found(Config) ->
 	not_found = orka:lookup(Key),
 
 	ct:log("✓ Lookup returns not_found for missing key"),
+	Config.
+
+%% @doc Test lookup_alive/1 returns entry for live process
+test_lookup_alive(Config) ->
+	Key = {global, service, lookup_alive_ok},
+	Pid = spawn(fun() -> receive after 10000 -> ok end end),
+
+	{ok, _} = orka:register(Key, Pid, #{tags => [service]}),
+	{ok, {Key, Pid, _}} = orka:lookup_alive(Key),
+
+	ok = orka:unregister(Key),
+	exit(Pid, kill),
+
+	ct:log("✓ lookup_alive/1 returns entry for live process"),
+	Config.
+
+%% @doc Test lookup_alive/1 returns not_found for dead process
+test_lookup_alive_dead_pid(Config) ->
+	Key = {global, service, lookup_alive_dead},
+	Pid = spawn(fun() -> receive after 10000 -> ok end end),
+	Ref = monitor(process, Pid),
+
+	{ok, _} = orka:register(Key, Pid, #{tags => [service]}),
+	exit(Pid, kill),
+	receive
+		{'DOWN', Ref, process, Pid, _} -> ok
+	end,
+
+	not_found = orka:lookup_alive(Key),
+	case orka:unregister(Key) of
+		ok -> ok;
+		not_found -> ok
+	end,
+
+	ct:log("✓ lookup_alive/1 returns not_found for dead process"),
 	Config.
 
 %% @doc Test unregistration
@@ -635,6 +682,38 @@ test_entries_by_tag_not_found(Config) ->
 	ct:log("✓ entries_by_tag/1 returns empty list when no matches"),
 	Config.
 
+%% @doc Test keys_by_tag/1 returns matching keys
+test_keys_by_tag(Config) ->
+	Key1 = {global, service, keys_tag_1},
+	Key2 = {global, user, keys_tag_2},
+	Key3 = {global, service, keys_tag_3},
+	Pid1 = spawn(fun() -> timer:sleep(10000) end),
+	Pid2 = spawn(fun() -> timer:sleep(10000) end),
+	Pid3 = spawn(fun() -> timer:sleep(10000) end),
+
+	{ok, _} = orka:register(Key1, Pid1, #{tags => [critical]}),
+	{ok, _} = orka:register(Key2, Pid2, #{tags => [critical]}),
+	{ok, _} = orka:register(Key3, Pid3, #{tags => [online]}),
+
+	Keys = orka:keys_by_tag(critical),
+	2 = length(Keys),
+	true = lists:any(fun(K) -> K =:= Key1 end, Keys),
+	true = lists:any(fun(K) -> K =:= Key2 end, Keys),
+	false = lists:any(fun(K) -> K =:= Key3 end, Keys),
+
+	ok = orka:unregister(Key1),
+	ok = orka:unregister(Key2),
+	ok = orka:unregister(Key3),
+
+	ct:log("✓ keys_by_tag/1 returns matching keys"),
+	Config.
+
+%% @doc Test keys_by_tag/1 returns empty list when no matches
+test_keys_by_tag_not_found(Config) ->
+	[] = orka:keys_by_tag(nonexistent_tag),
+	ct:log("✓ keys_by_tag/1 returns empty list when no matches"),
+	Config.
+
 %% @doc Test count_by_tag/1 returns 0 when no matches
 test_count_by_tag_not_found(Config) ->
 	0 = orka:count_by_tag(nonexistent_tag),
@@ -645,6 +724,38 @@ test_count_by_tag_not_found(Config) ->
 test_entries_by_type_not_found(Config) ->
 	[] = orka:entries_by_type(nonexistent_type),
 	ct:log("✓ entries_by_type/1 returns empty list when no matches"),
+	Config.
+
+%% @doc Test keys_by_type/1 returns matching keys
+test_keys_by_type(Config) ->
+	Key1 = {global, service, keys_type_1},
+	Key2 = {global, service, keys_type_2},
+	Key3 = {global, user, keys_type_3},
+	Pid1 = spawn(fun() -> timer:sleep(10000) end),
+	Pid2 = spawn(fun() -> timer:sleep(10000) end),
+	Pid3 = spawn(fun() -> timer:sleep(10000) end),
+
+	{ok, _} = orka:register(Key1, Pid1, #{tags => [service]}),
+	{ok, _} = orka:register(Key2, Pid2, #{tags => [service]}),
+	{ok, _} = orka:register(Key3, Pid3, #{tags => [user]}),
+
+	Keys = orka:keys_by_type(service),
+	2 = length(Keys),
+	true = lists:any(fun(K) -> K =:= Key1 end, Keys),
+	true = lists:any(fun(K) -> K =:= Key2 end, Keys),
+	false = lists:any(fun(K) -> K =:= Key3 end, Keys),
+
+	ok = orka:unregister(Key1),
+	ok = orka:unregister(Key2),
+	ok = orka:unregister(Key3),
+
+	ct:log("✓ keys_by_type/1 returns matching keys"),
+	Config.
+
+%% @doc Test keys_by_type/1 returns empty list when no matches
+test_keys_by_type_not_found(Config) ->
+	[] = orka:keys_by_type(nonexistent_type),
+	ct:log("✓ keys_by_type/1 returns empty list when no matches"),
 	Config.
 
 %% @doc Test register_with/3 - start and register a process atomically

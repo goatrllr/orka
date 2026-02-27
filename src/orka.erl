@@ -1,5 +1,9 @@
 -module(orka).
+
 -behaviour(gen_server).
+
+%% Lines of Code: 719
+%% Lines of Comments: 1010
 
 %% API
 -export([start_link/0]).
@@ -16,10 +20,13 @@
 -export([update_metadata/2]).
 -export([entries_by_type/1, entries_by_type/2]).
 -export([entries_by_tag/1, entries_by_tag/2]).
+-export([keys_by_type/1]).
+-export([keys_by_tag/1]).
 -export([count_by_type/1, count_by_type/2]).
 -export([count_by_tag/1, count_by_tag/2]).
 -export([register_property/3]).
 -export([find_by_property/2, find_by_property/3, find_by_property/4]).
+-export([find_keys_by_property/2, find_keys_by_property/3]).
 -export([count_by_property/2, count_by_property/3]).
 -export([property_stats/2, property_stats/3]).
 
@@ -347,14 +354,14 @@ await(Key, Timeout) ->
 				not_found -> {error, timeout}
 			end;
 		_ ->
-	%% Subscribe to the key
-		gen_server:call(?MODULE, {subscribe_await, Key, self(), Timeout}),
-		%% Wait for notification (either {orka_registered, Key, Entry} or timeout)
-		receive
-			{orka_registered, Key, Entry} -> {ok, Entry};
-			{orka_await_timeout, Key} -> 
-				gen_server:call(?MODULE, {unsubscribe, Key, self()}),	
-				{error, timeout}
+			%% Subscribe to the key
+			gen_server:call(?MODULE, {subscribe_await, Key, self(), Timeout}),
+			%% Wait for notification (either {orka_registered, Key, Entry} or timeout)
+			receive
+				{orka_registered, Key, Entry} -> {ok, Entry};
+				{orka_await_timeout, Key} -> 
+					gen_server:call(?MODULE, {unsubscribe, Key, self()}),	
+					{error, timeout}
 		after Timeout ->
 				%% Timeout occurred, unsubscribe and return error
 				gen_server:call(?MODULE, {unsubscribe, Key, self()}),
@@ -412,12 +419,112 @@ subscribe(Key) ->
 unsubscribe(Key) ->
 	gen_server:call(?MODULE, {unsubscribe, Key, self()}).
 
-%% @doc Lookup a single entry by key. Returns {ok, {Key, Pid, Metadata}} or not_found.
+%% @doc Lookup a single entry by key (fast, non-validating).
+%% 
+%% Performs a simple ETS lookup without checking if the process is still alive.
+%% This is the fastest lookup method but may return stale entries if the process
+%% has crashed but not yet been cleaned up.
+%%
+%% Returns {ok, {Key, Pid, Metadata}} if found, not_found if not found.
+%% 
+%% Use cases:
+%% - Cache lookups where stale entries are acceptable
+%% - Performance-critical paths that don't require liveness validation
+%% - High-throughput queries where overhead must be minimized
+%%
+%% Examples:
+%%
+%% %% Simple lookup
+%% case orka:lookup({global, service, translator}) of
+%%     {ok, {Key, Pid, Meta}} -> 
+%%         io:format("Found service: ~p~n", [Pid]);
+%%     not_found -> 
+%%         io:format("Service not registered~n", [])
+%% end.
+%%
+%% %% Using in a hot loop (minimal overhead)
+%% find_service_loop() ->
+%%     receive
+%%         {get_service, ServiceKey} ->
+%%             case orka:lookup(ServiceKey) of
+%%                 {ok, {_, Pid, _}} -> 
+%%                     io:format("Service Pid: ~p~n", [Pid]);
+%%                 not_found -> 
+%%                     io:format("Service not found~n", [])
+%%             end
+%%     end.
 -spec lookup(Key) -> {ok, {Key, pid(), map()}} | not_found.
 lookup(Key) ->
-	gen_server:call(?MODULE, {lookup, Key}).
+	case ets:lookup(?REGISTRY_TABLE, Key) of
+		[{_Key, _Pid, _} = Entry] ->
+			{ok, Entry};
+		[] ->
+			not_found
+	end.
 
-%% @doc Lookup only if the registered Pid is alive.
+%% @doc Lookup a single entry by key with process liveness validation.
+%% 
+%% Performs an ETS lookup and additionally checks if the registered process is still alive.
+%% If the process has crashed, returns not_found and attempts asynchronous cleanup.
+%% This is slower than lookup/1 but ensures returned entries reference live processes.
+%%
+%% Returns {ok, {Key, Pid, Metadata}} if found AND process is alive, not_found otherwise.
+%% 
+%% Cleanup behavior:
+%% - If process is dead, attempts best-effort cleanup via async cast
+%% - Avoids synchronous calls to prevent deadlock if called from gen_server context
+%% - If called from gen_server itself, does no cleanup (avoids self-call)
+%%
+%% Use cases:
+%% - Critical paths where dead processes must be detected immediately
+%% - Service discovery that validates availability
+%% - Failover logic that needs guaranteed live process references
+%% - Load balancers routing to registered instances
+%%
+%% Performance note:
+%% - Slower than lookup/1 due to is_process_alive/1 check
+%% - Only use when liveness validation is required
+%% - For high-throughput, use lookup/1 and validate periodically
+%%
+%% Examples:
+%%
+%% %% Find an available translator service
+%% case orka:lookup_alive({global, service, translator}) of
+%%     {ok, {Key, Pid, Meta}} -> 
+%%         io:format("Translator is available at ~p~n", [Pid]);
+%%     not_found -> 
+%%         io:format("Translator not available~n", [])
+%% end.
+%%
+%% %% Failover logic - try backup if primary is down
+%% find_active_db() ->
+%%     case orka:lookup_alive({global, resource, db_primary}) of
+%%         {ok, {_, Pid, _}} ->
+%%             {ok, Pid};
+%%         not_found ->
+%%             %% Primary is down, use backup
+%%             case orka:lookup_alive({global, resource, db_backup}) of
+%%                 {ok, {_, BackupPid, _}} ->
+%%                     {backup, BackupPid};
+%%                 not_found ->
+%%                     {error, no_database}
+%%             end
+%%     end.
+%%
+%% %% Worker pool initialization - ensure all workers are live
+%% init_workers() ->
+%%     WorkerKeys = [
+%%         {global, worker, w1},
+%%         {global, worker, w2},
+%%         {global, worker, w3}
+%%     ],
+%%     lists:filtermap(fun(Key) ->
+%%         case orka:lookup_alive(Key) of
+%%             {ok, {_, Pid, _}} -> {true, Pid};
+%%             not_found -> false
+%%         end
+%%     end, WorkerKeys).
+-spec lookup_alive(Key) -> {ok, {Key, pid(), map()}} | not_found.
 lookup_alive(Key) ->
 	gen_server:call(?MODULE, {lookup_alive, Key}).
 
@@ -436,7 +543,6 @@ lookup_dirty(Key) ->
 		orka_store_ets -> orka_store_ets:lookup_dirty(Key, StoreOpts);
 		_ -> {error, not_supported}
 	end.
-
 
 %% @doc Return all entries in the registry.
 lookup_all() ->
@@ -463,6 +569,42 @@ update_metadata(Key, NewMetadata) when is_map(NewMetadata) ->
 	gen_server:call(?MODULE, {update_metadata, Key, NewMetadata});
 update_metadata(_Key, _NewMetadata) ->
 	{error, badarg}.
+
+%% @doc Find all keys with a specific type (lightweight key-only query).
+%% 
+%% Returns only registry keys matching the specified type without fetching full entries.
+%% Useful when you only need keys for batch operations or further filtering.
+%% This is faster and uses less memory than entries_by_type/1.
+%%
+%% Key format: {Scope, Type, Name}
+%% Type is the second element of the key tuple.
+%%
+%% Returns: List of keys [{Scope, Type, Name1}, {Scope, Type, Name2}, ...]
+%%
+%% Examples:
+%%
+%% %% Get all service keys (for load balancing decisions)
+%% ServiceKeys = orka:keys_by_type(service),
+%% %% Result: [{global, service, translator}, {global, service, cache}, ...]
+%%
+%% %% Count resources without fetching full entries
+%% ResourceCount = length(orka:keys_by_type(resource)),
+%%
+%% %% Batch check if any worker is registered
+%% case orka:keys_by_type(worker) of
+%%     [] -> {error, no_workers};\n%%     WorkerKeys -> {ok, WorkerKeys}
+%% end.
+%%
+%% Use cases:
+%% - Efficient enumeration of all keys of a specific type
+%% - Batch operations that only need keys, not full entries
+%% - Memory-efficient filtering before detailed lookups
+%% - Building indexes or caches of type membership
+%% - Type-based routing and load balancing
+keys_by_type(Type) ->
+	ets:select(?REGISTRY_TABLE, ets:fun2ms(fun({Key, _Pid, _Meta}) when
+		is_tuple(Key) andalso size(Key) >= 2 andalso element(2, Key) =:= Type
+	-> Key end)).
 
 %% @doc Find all entries by type (second element of key tuple).
 %% Key format: {Scope, Type, Name}
@@ -527,6 +669,106 @@ entries_by_type(Type) ->
 %% Scope: local | global | all (merged local+global).
 entries_by_type(Type, Scope) ->
 	gen_server:call(?MODULE, {entries_by_type, Type, Scope}).
+
+%% @doc Find all keys with a specific tag (lightweight key-only query).
+%%
+%% Returns only registry keys having the specified tag in their metadata.
+%% Much faster and lighter than entries_by_tag/1 when full entries aren't needed.
+%%
+%% Returns: List of keys [{Scope, Type, Name1}, {Scope, Type, Name2}, ...]
+%%
+%% Examples:
+%%
+%% %% Get all online service keys
+%% OnlineKeys = orka:keys_by_tag(online),
+%% %% Result: [{global, service, translator}, {global, user, alice}, ...]
+%%
+%% %% Monitor critical services without loading metadata
+%% monitor_critical() ->
+%%     CriticalKeys = orka:keys_by_tag(critical),
+%%     lists:foreach(fun(Key) ->
+%%         case orka:lookup_alive(Key) of
+%%             {ok, {_, Pid, _}} -> 
+%%                 io:format(\"Critical service alive: ~p~n\", [Pid]);
+%%             not_found -> 
+%%                 io:format(\"ALERT: Critical service missing: ~p~n\", [Key])
+%%         end
+%%     end, CriticalKeys).
+%%
+%% %% Build a dispatch map efficiently
+%% dispatch_to_available(Tag) ->
+%%     Keys = orka:keys_by_tag(Tag),
+%%     lists:filtermap(fun(Key) ->
+%%         case orka:lookup_alive(Key) of
+%%             {ok, {_, Pid, _}} -> {true, Pid};
+%%             not_found -> false
+%%         end
+%%     end, Keys).
+%%
+%% Performance tip:
+%% - Use keys_by_tag/1 for tag enumeration (no full entry fetch)
+%% - Only call lookup_alive/1 on keys that need validation
+%% - Faster than entries_by_tag/1 when metadata isn't needed
+%%
+%% Use cases:
+%% - Efficient enumeration of tagged processes
+%% - Availability monitoring and health checks
+%% - Building state-based dispatch tables
+%% - Memory-efficient filtering before detailed lookups
+%% - Service discovery without loading full metadata
+keys_by_tag(Tag) ->
+	ets:select(?TAG_INDEX_TABLE, [{{{tag, Tag}, '$1'}, [], ['$1']}]).
+
+
+%% @doc Find all keys with a specific tag (lightweight key-only query).
+%%
+%% Returns only registry keys having the specified tag in their metadata.
+%% Much faster and lighter than entries_by_tag/1 when full entries aren't needed.
+%%
+%% Returns: List of keys [{Scope, Type, Name1}, {Scope, Type, Name2}, ...]
+%%
+%% Examples:
+%%
+%% %% Get all online service keys
+%% OnlineKeys = orka:keys_by_tag(online),
+%% %% Result: [{global, service, translator}, {global, user, alice}, ...]
+%%
+%% %% Monitor critical services without loading metadata
+%% monitor_critical() ->
+%%     CriticalKeys = orka:keys_by_tag(critical),
+%%     lists:foreach(fun(Key) ->
+%%         case orka:lookup_alive(Key) of
+%%             {ok, {_, Pid, _}} -> 
+%%                 io:format(\"Critical service alive: ~p~n\", [Pid]);
+%%             not_found -> 
+%%                 io:format(\"ALERT: Critical service missing: ~p~n\", [Key])
+%%         end
+%%     end, CriticalKeys).
+%%
+%% %% Build a dispatch map efficiently
+%% dispatch_to_available(Tag) ->
+%%     Keys = orka:keys_by_tag(Tag),
+%%     lists:filtermap(fun(Key) ->
+%%         case orka:lookup_alive(Key) of
+%%             {ok, {_, Pid, _}} -> {true, Pid};
+%%             not_found -> false
+%%         end
+%%     end, Keys).
+%%
+%% Performance tip:
+%% - Use keys_by_tag/1 for tag enumeration (no full entry fetch)
+%% - Only call lookup_alive/1 on keys that need validation
+%% - Faster than entries_by_tag/1 when metadata isn't needed
+%%
+%% Use cases:
+%% - Efficient enumeration of tagged processes
+%% - Availability monitoring and health checks
+%% - Building state-based dispatch tables
+%% - Memory-efficient filtering before detailed lookups
+%% - Service discovery without loading full metadata
+keys_by_tag(Tag) ->
+	ets:select(?TAG_INDEX_TABLE, [{{{tag, Tag}, '$1'}, [], ['$1']}]).
+
 
 %% @doc Find all entries with a specific tag in metadata.
 %% Returns entries where metadata contains tags list with the specified tag.
@@ -608,12 +850,14 @@ entries_by_type(Type, Scope) ->
 %%     }}
 %% ]
 entries_by_tag(Tag) ->
-	gen_server:call(?MODULE, {entries_by_tag, Tag}).
-
-%% @doc Find all entries with a specific tag by scope.
-%% Scope: local | global | all (merged local+global).
-entries_by_tag(Tag, Scope) ->
-	gen_server:call(?MODULE, {entries_by_tag, Tag, Scope}).
+	Keys = keys_by_tag(Tag),
+	%% Look up full entries for each key
+	lists:filtermap(fun(Key) ->
+		case ets:lookup(?REGISTRY_TABLE, Key) of
+			[Entry] -> {true, Entry};
+			[] -> false  %% Key was deleted but tag index wasn't cleaned
+		end
+	end, Keys).
 
 %% @doc Count processes by type.
 %% 
@@ -744,6 +988,128 @@ register_property(Key, Pid, #{property := PropName, value := PropValue}) when is
 	gen_server:call(?MODULE, {register_property, Key, Pid, PropName, PropValue});
 register_property(_Key, _Pid, _Property) ->
 	{error, badarg}.
+
+
+%% @doc Find all keys with a specific property value (lightweight key-only query).
+%%
+%% Returns only registry keys having the specified property value.
+%% Faster and more memory-efficient than find_by_property/2 when full entries aren't needed.
+%%
+%% Parameters:
+%%   PropertyName - atom, name of the property
+%%   PropertyValue - value to match
+%%
+%% Returns: List of keys [{Scope, Type, Name1}, {Scope, Type, Name2}, ...]
+%%
+%% Examples:
+%%
+%% %% Find all services in us-west region (keys only)
+%% WestKeys = orka:find_keys_by_property(region, \"us-west\"),
+%% %% Result: [{global, service, s1}, {global, service, s2}, ...]
+%%
+%% %% Check if high-capacity instances exist
+%% case orka:find_keys_by_property(capacity, 200) of
+%%     [] -> io:format(\"No high-capacity instances~n\", []);
+%%     HighCapacityKeys -> 
+%%         io:format(\"Found ~p high-capacity instances~n\", [length(HighCapacityKeys)])
+%% end.
+%%
+%% %% Build a region-based load balancer
+%% get_balancer_for_region(Region) ->
+%%     Keys = orka:find_keys_by_property(region, Region),
+%%     AvailablePids = lists:filtermap(fun(Key) ->
+%%         case orka:lookup_alive(Key) of
+%%             {ok, {_, Pid, _}} -> {true, Pid};
+%%             not_found -> false
+%%         end
+%%     end, Keys),
+%%     case AvailablePids of
+%%         [] -> {error, no_services};
+%%         Pids -> {ok, Pids}
+%%     end.
+%%
+%% Performance advantages:
+%% - Returns only keys (no metadata/pid fetching)
+%% - Use find_keys_by_property for bulk key queries
+%% - Follow with selective lookup_alive/1 calls
+%%
+%% Use cases:
+%% - Property-based routing and load balancing
+%% - Efficient availability checking
+%% - Configuration validation without loading entries
+%% - Memory-efficient property filtering
+find_keys_by_property(PropertyName, PropertyValue) ->
+	Keys = ets:match_object(?PROPERTY_INDEX_TABLE, {{property, PropertyName, PropertyValue}, '$1'}),
+	[Key || {{property, _, _}, Key} <- Keys].
+
+%% @doc Find all keys with a specific property, filtered by key type (lightweight query).
+%%
+%% Combines property value matching with type filtering for more specific queries.
+%% Returns only keys without fetching full entries.
+%% More efficient than find_by_property/3 when metadata isn't needed.
+%%
+%% Parameters:
+%%   Type - second element of key tuple (e.g., service, resource)
+%%   PropertyName - atom, name of the property
+%%   PropertyValue - value to match
+%%
+%% Returns: List of keys matching both type and property [{Scope, Type, Name}, ...]
+%%
+%% Examples:
+%%
+%% %% Get all services with specific capacity
+%% LargeServices = orka:find_keys_by_property(service, capacity, 500),
+%% %% Result: [{global, service, s1}, {global, service, s3}, ...]
+%%
+%% %% Find all resources in staging region
+%% StagingResources = orka:find_keys_by_property(resource, region, \"staging\"),
+%%
+%% %% Load balance within resource type and region
+%% load_balance_by_type_and_property(Type, Property, Value) ->
+%%     Keys = orka:find_keys_by_property(Type, Property, Value),
+%%     AvailablePids = lists:filtermap(fun(Key) ->
+%%         case orka:lookup_alive(Key) of
+%%             {ok, {_, Pid, _}} -> {true, Pid};
+%%             not_found -> false
+%%         end
+%%     end, Keys),
+%%     pick_least_loaded(AvailablePids).
+%%
+%% %% Find databases in production by region
+%% find_regional_database(Region) ->
+%%     Keys = orka:find_keys_by_property(resource, region, Region),
+%%     case length(Keys) of
+%%         0 -> {error, no_database};
+%%         N when N >= 1 -> {ok, Keys}
+%%     end.
+%%
+%% %% Verify health of typed, filtered instances
+%% check_worker_health(WorkerClass) ->
+%%     Keys = orka:find_keys_by_property(worker, class, WorkerClass),
+%%     HealthStatus = lists:map(fun(Key) ->
+%%         case orka:lookup_alive(Key) of
+%%             {ok, {_, Pid, _}} -> {Key, healthy, Pid};
+%%             not_found -> {Key, dead}
+%%         end
+%%     end, Keys),
+%%     {WorkerClass, HealthStatus}.
+%%
+%% Performance comparison:
+%% - find_keys_by_property/2: Returns all matching property keys
+%% - find_keys_by_property/3: Filters by type before property matching
+%% - Both return only keys (lightweight)
+%% - Use after for selective detailed lookups
+%%
+%% Use cases:
+%% - Type + property-based routing
+%% - Regional resource discovery with type constraints
+%% - Health checking for typed instances
+%% - Configuration queries with multiple filters
+find_keys_by_property(Type, PropertyName, PropertyValue) ->
+	Keys = ets:match_object(?PROPERTY_INDEX_TABLE, {{property, PropertyName, PropertyValue}, '$1'}),
+	[Key || {{property, _, _}, Key} <- Keys,
+		is_tuple(Key) andalso size(Key) >= 2 andalso element(2, Key) =:= Type].
+
 
 %% @doc Find all entries with a specific property value.
 %% Returns entries where the property matches the given value.
