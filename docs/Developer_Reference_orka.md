@@ -269,9 +269,9 @@ orka/
 │   └── orka_SUITE.erl        # 74 passing tests covering all functions
 │
 ├── docs/
-│   ├── API_Documentation.md  # Complete API reference [YOU ARE HERE]
-│   ├── Developer_Reference.md # Design and architecture [YOU ARE HERE]
-│   ├── Examples_&_Use_Cases.md # Patterns and code examples
+│   ├── API_Documentation_orka.md  # Complete API reference [YOU ARE HERE]
+│   ├── Developer_Reference_orka.md # Design and architecture [YOU ARE HERE]
+│   ├── Examples_&_Use_Cases_orka.md # Patterns and code examples
 │   ├── usage_patterns.md      # 8 fundamental patterns
 │   ├── singleton_examples.md  # 7 singleton use cases
 │   ├── property_examples.md   # 6 property-based queries
@@ -486,5 +486,5 @@ For larger scales, consider:
 ## See Also
 
 - [../README.md](../README.md) — Project overview and quick start
-- [API_Documentation.md](API_Documentation.md) — Complete function reference
-- [Examples_&_Use_Cases.md](Examples_&_Use_Cases.md) — Practical patterns and code
+- [API_Documentation_orka.md](API_Documentation_orka.md) — Complete function reference
+- [Examples_&_Use_Cases_orka.md](Examples_&_Use_Cases_orka.md) — Practical patterns and code

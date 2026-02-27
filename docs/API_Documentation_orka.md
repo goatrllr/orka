@@ -781,5 +781,5 @@ Get total number of entries in registry.
 ## See Also
 
 - [../README.md](../README.md) — Quick start and project overview
-- [Developer_Reference.md](Developer_Reference.md) — Design and architecture
-- [Examples_&_Use_Cases.md](Examples_&_Use_Cases.md) — Practical patterns and code examples
+- [Developer_Reference_orka.md](Developer_Reference_orka.md) — Design and architecture
+- [Examples_&_Use_Cases_orka.md](Examples_&_Use_Cases_orka.md) — Practical patterns and code examples

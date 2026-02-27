@@ -226,9 +226,9 @@ For complete documentation with specs and examples, see [API Documentation](docs
 
 Orka documentation is organized into four comprehensive guides:
 
-1. **[Examples & Use Cases](docs/Examples_&_Use_Cases.md)** — Real-world patterns, use cases, and working code examples
-2. **[API Documentation](docs/API_Documentation.md)** — Complete reference for all 31 functions with specs and examples
-3. **[Developer Reference](docs/Developer_Reference.md)** — Design principles, architecture, testing, and extension patterns
+1. **[Examples & Use Cases](docs/Examples_&_Use_Cases_orka.md)** — Real-world patterns, use cases, and working code examples
+2. **[API Documentation](docs/API_Documentation_orka.md)** — Complete reference for all 31 functions with specs and examples
+3. **[Developer Reference](docs/Developer_Reference_orka.md)** — Design principles, architecture, testing, and extension patterns
 4. **[README.md](README.md)** (this file) — Project overview and quick start
 
 
