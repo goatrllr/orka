@@ -19,6 +19,28 @@ cleanup(_) ->
     catch application:stop(orka),
     ok.
 
+wait_until(_Pred, 0) ->
+    false;
+wait_until(Pred, N) ->
+    case Pred() of
+        true -> true;
+        false ->
+            timer:sleep(10),
+            wait_until(Pred, N - 1)
+    end.
+
+sleeping_pid() ->
+    spawn(fun() ->
+        receive
+            stop -> ok
+        after 10000 -> ok
+        end
+    end).
+
+safe_unregister_name(Name) ->
+    catch erlang:unregister(Name),
+    ok.
+
 %%====================================================================
 %% Registration Tests
 %%====================================================================
@@ -137,6 +159,135 @@ register_atom_key_test_() ->
         
         orka:unregister(Key),
         exit(Pid, kill)
+    end}.
+
+register_dual_registers_in_both_namespaces_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun() ->
+        Name = orka_dual_eunit_name,
+        safe_unregister_name(Name),
+        Pid = sleeping_pid(),
+
+        {ok, {Name, Pid, _}} = orka:register_dual(Name, Pid, #{role => dual}),
+        ?assertEqual(Pid, erlang:whereis(Name)),
+        {ok, {Name, Pid, _}} = orka:lookup(Name),
+
+        ok = orka:unregister(Name),
+        ?assertEqual(undefined, erlang:whereis(Name)),
+        Pid ! stop
+    end}.
+
+register_metadata_flag_delegates_to_dual_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun() ->
+        Name = orka_dual_metadata_eunit_name,
+        safe_unregister_name(Name),
+        Pid = sleeping_pid(),
+
+        {ok, {Name, Pid, Meta}} = orka:register(Name, Pid, #{erlang_register => true, tags => [server]}),
+        ?assertEqual(Pid, erlang:whereis(Name)),
+        ?assertEqual(true, maps:get(erlang_register, Meta)),
+
+        ok = orka:unregister(Name),
+        ?assertEqual(undefined, erlang:whereis(Name)),
+        Pid ! stop
+    end}.
+
+register_erlang_atom_adopts_existing_registration_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun() ->
+        Name = orka_adopted_eunit_name,
+        Key = {adopted, Name},
+        safe_unregister_name(Name),
+        Pid = sleeping_pid(),
+        true = erlang:register(Name, Pid),
+
+        {ok, {Key, Pid, Meta}} = orka:register(Key, Pid, #{erlang_atom => Name, tags => [wrapped]}),
+        ?assertEqual(Name, maps:get(erlang_atom, Meta)),
+        ?assertEqual(Pid, erlang:whereis(Name)),
+
+        ok = orka:unregister(Key),
+        ?assertEqual(Pid, erlang:whereis(Name)),
+        safe_unregister_name(Name),
+        Pid ! stop
+    end}.
+
+register_erlang_atom_rejects_missing_registration_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun() ->
+        Name = orka_missing_adopted_eunit_name,
+        Key = {missing_adopted, Name},
+        safe_unregister_name(Name),
+        Pid = sleeping_pid(),
+
+        ?assertMatch({error, {erlang_name_not_registered, Name}}, orka:register(Key, Pid, #{erlang_atom => Name})),
+        ?assertEqual(not_found, orka:lookup(Key)),
+        Pid ! stop
+    end}.
+
+register_erlang_atom_rejects_mismatched_pid_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun() ->
+        Name = orka_mismatch_adopted_eunit_name,
+        Key = {mismatch_adopted, Name},
+        safe_unregister_name(Name),
+        Pid = sleeping_pid(),
+        OtherPid = sleeping_pid(),
+        true = erlang:register(Name, OtherPid),
+
+        ?assertMatch({error, {erlang_name_pid_mismatch, Name, OtherPid}}, orka:register(Key, Pid, #{erlang_atom => Name})),
+        ?assertEqual(not_found, orka:lookup(Key)),
+        safe_unregister_name(Name),
+        Pid ! stop,
+        OtherPid ! stop
+    end}.
+
+register_erlang_atom_allows_non_atom_orka_key_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun() ->
+        Name = orka_non_atom_key_adopted_eunit_name,
+        Key = {non_atom, key, Name},
+        safe_unregister_name(Name),
+        Pid = sleeping_pid(),
+        true = erlang:register(Name, Pid),
+
+        {ok, {Key, Pid, _}} = orka:register(Key, Pid, #{erlang_atom => Name}),
+        ok = orka:unregister(Key),
+        ?assertEqual(Pid, erlang:whereis(Name)),
+        safe_unregister_name(Name),
+        Pid ! stop
+    end}.
+
+register_dual_rejects_non_atom_keys_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun() ->
+        Key = {dual, non_atom},
+        Pid = sleeping_pid(),
+
+        ?assertEqual({error, badarg}, orka:register_dual(Key, Pid, #{})),
+        ?assertEqual(not_found, orka:lookup(Key)),
+        Pid ! stop
+    end}.
+
+dead_pid_cleanup_removes_dual_erlang_name_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun() ->
+        Name = orka_dead_dual_eunit_name,
+        safe_unregister_name(Name),
+        Pid = sleeping_pid(),
+        {ok, {Name, Pid, _}} = orka:register_dual(Name, Pid, #{}),
+        exit(Pid, kill),
+
+        ?assert(wait_until(fun() -> erlang:whereis(Name) =:= undefined end, 100)),
+        ?assertEqual(not_found, orka:lookup(Name))
+    end}.
+
+dead_pid_cleanup_for_adopted_entry_does_not_unregister_erlang_name_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun() ->
+        Name = orka_dead_adopted_eunit_name,
+        Key = {dead_adopted, Name},
+        safe_unregister_name(Name),
+        Pid = sleeping_pid(),
+        true = erlang:register(Name, Pid),
+        {ok, {Key, Pid, _}} = orka:register(Key, Pid, #{erlang_atom => Name}),
+        exit(Pid, kill),
+
+        ?assert(wait_until(fun() -> orka:lookup(Key) =:= not_found end, 100)),
+        %% The Erlang runtime keeps the registered atom until the process exit
+        %% removes it; Orka must not explicitly unregister adopted names.
+        ?assertEqual(undefined, erlang:whereis(Name))
     end}.
 
 %% Register with binary as key component

@@ -50,6 +50,43 @@ case orka:lookup({global, service, unknown}) of
 end.
 ```
 
+### Erlang Local-Name Compatibility
+
+Ordinary Orka keys may be any term and do not affect Erlang's local
+registered-name table. When a process also needs to be reachable by APIs that
+call `erlang:whereis/1`, opt in explicitly with an atom key:
+
+```erlang
+{ok, {Name, Pid, _Meta}} =
+    orka:register_dual(Name, Pid, #{tags => [server]}),
+Pid = erlang:whereis(Name).
+```
+
+The metadata flag form uses the same atomic path:
+
+```erlang
+{ok, _} = orka:register(Name, Pid, #{erlang_register => true}).
+```
+
+Dual registration is all-or-nothing. If Erlang registration fails, no Orka entry
+is left behind; if Orka registration fails after Erlang registration succeeds,
+Orka rolls back the Erlang name.
+
+To add Orka metadata for a process that some other application already
+registered with Erlang, use adoption:
+
+```erlang
+true = erlang:register(existing_name, Pid),
+{ok, _} = orka:register({wrapped, existing_name}, Pid, #{
+    erlang_atom => existing_name,
+    tags => [wrapped]
+}).
+```
+
+Adoption requires `erlang:whereis(existing_name) =:= Pid`. Orka records the
+entry but does not own the Erlang name, so `orka:unregister/1` removes only the
+Orka entry.
+
 ### Query by Tag
 
 ```erlang

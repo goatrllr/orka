@@ -7,7 +7,7 @@
 
 %% API
 -export([start_link/0]).
--export([register/2, register/3]).
+-export([register/2, register/3, register_dual/2, register_dual/3]).
 -export([register_batch/1]).
 -export([register_batch_with/1]).
 -export([register_with/3]).
@@ -39,6 +39,7 @@
 -define(REGISTRY_TABLE, orka_table).
 -define(TAG_INDEX_TABLE, orka_tag_index).
 -define(PROPERTY_INDEX_TABLE, orka_property_index).
+-define(ERLANG_NAME_OWNERSHIP_TABLE, orka_erlang_name_ownership).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Suggested Key & Metadata Format
@@ -136,8 +137,28 @@ register(Key, Metadata) ->
 %% @doc Register a process with a key, specific Pid, and metadata.
 %% Supports supervisor registration of child processes.
 register(Key, Pid, Metadata) when is_pid(Pid), is_map(Metadata) ->
-	gen_server:call(?MODULE, {register, Key, Pid, Metadata});
+	case maps:get(erlang_register, Metadata, false) of
+		true ->
+			gen_server:call(?MODULE, {register_dual, Key, Pid, Metadata});
+		_ ->
+			case maps:find(erlang_atom, Metadata) of
+				{ok, Name} ->
+					gen_server:call(?MODULE, {register_adopted_erlang_atom, Key, Pid, Name, Metadata});
+				error ->
+					gen_server:call(?MODULE, {register, Key, Pid, Metadata})
+			end
+	end;
 register(_Key, _Pid, _Metadata) ->
+	{error, badarg}.
+
+%% @doc Register an atom key in both Orka and Erlang's local registered-name table.
+%% The operation is atomic: if either registry cannot be updated, neither is left behind.
+register_dual(Name, Metadata) ->
+	register_dual(Name, self(), Metadata).
+
+register_dual(Name, Pid, Metadata) when is_atom(Name), is_pid(Pid), is_map(Metadata) ->
+	gen_server:call(?MODULE, {register_dual, Name, Pid, maps:put(erlang_register, true, Metadata)});
+register_dual(_Name, _Pid, _Metadata) ->
 	{error, badarg}.
 
 %% @doc Start a process using {Module, Function, Arguments} and register it atomically.
@@ -1192,6 +1213,14 @@ init([]) ->
 		public,        %% allow read access from any process
 		named_table    %% allow access by name
 	]),
+	%% Internal ownership table for Erlang local names associated with Orka keys.
+	%% Entries are {Key, Name, Pid, UnregisterOnCleanup}. This is deliberately
+	%% separate from user metadata returned by lookup/1.
+	ets:new(?ERLANG_NAME_OWNERSHIP_TABLE, [
+		set,
+		protected,
+		named_table
+	]),
 	%% Store for tracking monitored pids -> keys mapping, subscribers, and monitor refs
 	%% State is tuple: {PidSingletonMap, PidKeyMap, SubscribersMap, MonitorMap}
 	%% PidSingletonMap: #{Pid => Key} for singleton constraint tracking
@@ -1231,6 +1260,12 @@ handle_call({register, Key, Pid, Metadata}, _From, {PidSingleton, PidKeyMap, Sub
 		ExistingKey ->
 			{reply, {error, {already_registered_under_key, ExistingKey}}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 	end;
+
+handle_call({register_dual, Name, Pid, Metadata}, _From, State) ->
+	register_dual_atomic(Name, Pid, Metadata, State);
+
+handle_call({register_adopted_erlang_atom, Key, Pid, Name, Metadata}, _From, State) ->
+	register_adopted_erlang_atom(Key, Pid, Name, Metadata, State);
 
 %% @doc Handle batch registration - all or nothing
 handle_call({register_batch, Registrations}, _From, State) ->
@@ -1522,6 +1557,111 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal Functions
 %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+register_dual_atomic(Name, Pid, Metadata, State) when is_atom(Name) ->
+	case try_erlang_register(Name, Pid) of
+		ok ->
+			case register_orka_entry(Name, Pid, Metadata, State) of
+				{reply, {ok, {Name, Pid, _}} = Reply, UpdatedState} ->
+					record_erlang_name_ownership(Name, Name, Pid, true),
+					{reply, Reply, UpdatedState};
+				{reply, {ok, {Name, _OtherPid, _}} = Reply, UpdatedState} ->
+					safe_erlang_unregister(Name, Pid),
+					{reply, Reply, UpdatedState};
+				{reply, ErrorReply, _} ->
+					safe_erlang_unregister(Name, Pid),
+					{reply, ErrorReply, State}
+			end;
+		{error, Reason} ->
+			{reply, {error, Reason}, State}
+	end;
+register_dual_atomic(_Name, _Pid, _Metadata, State) ->
+	{reply, {error, badarg}, State}.
+
+register_adopted_erlang_atom(Key, Pid, Name, Metadata, State) when is_atom(Name) ->
+	case erlang:whereis(Name) of
+		Pid ->
+			case register_orka_entry(Key, Pid, Metadata, State) of
+				{reply, {ok, {Key, Pid, _}} = Reply, UpdatedState} ->
+					record_erlang_name_ownership(Key, Name, Pid, false),
+					{reply, Reply, UpdatedState};
+				{reply, {ok, {Key, _OtherPid, _}} = Reply, UpdatedState} ->
+					{reply, Reply, UpdatedState};
+				{reply, ErrorReply, _} ->
+					{reply, ErrorReply, State}
+			end;
+		undefined ->
+			{reply, {error, {erlang_name_not_registered, Name}}, State};
+		OtherPid ->
+			{reply, {error, {erlang_name_pid_mismatch, Name, OtherPid}}, State}
+	end;
+register_adopted_erlang_atom(_Key, _Pid, _Name, _Metadata, State) ->
+	{reply, {error, badarg}, State}.
+
+register_orka_entry(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
+	case maps:get(Pid, PidSingleton, undefined) of
+		undefined ->
+			case ets:lookup(?REGISTRY_TABLE, Key) of
+				[] ->
+					do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap});
+				[{Key, ExistingPid, _ExistingMetadata} = Entry] ->
+					case is_process_alive(ExistingPid) of
+						true ->
+							{reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
+						false ->
+							NewState = remove_dead_pid_entries(ExistingPid, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}),
+							do_register(Key, Pid, Metadata, NewState)
+					end
+			end;
+		ExistingKey when ExistingKey =:= Key ->
+			case ets:lookup(?REGISTRY_TABLE, Key) of
+				[Entry] -> {reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
+				[] -> do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap})
+			end;
+		ExistingKey ->
+			{reply, {error, {already_registered_under_key, ExistingKey}}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
+	end.
+
+try_erlang_register(Name, Pid) ->
+	case erlang:whereis(Name) of
+		undefined ->
+			try erlang:register(Name, Pid) of
+				true -> ok
+			catch
+				error:badarg -> {error, {erlang_register_failed, Name}}
+			end;
+		ExistingPid ->
+			{error, {erlang_name_taken, Name, ExistingPid}}
+	end.
+
+record_erlang_name_ownership(Key, Name, Pid, UnregisterOnCleanup) ->
+	ets:insert(?ERLANG_NAME_OWNERSHIP_TABLE, {Key, Name, Pid, UnregisterOnCleanup}),
+	ok.
+
+cleanup_erlang_name_ownership(Key, Pid) ->
+	case ets:lookup(?ERLANG_NAME_OWNERSHIP_TABLE, Key) of
+		[{Key, Name, Pid, true}] ->
+			safe_erlang_unregister(Name, Pid),
+			ets:delete(?ERLANG_NAME_OWNERSHIP_TABLE, Key),
+			ok;
+		[{Key, _Name, Pid, false}] ->
+			ets:delete(?ERLANG_NAME_OWNERSHIP_TABLE, Key),
+			ok;
+		[{Key, _Name, _OtherPid, _}] ->
+			ets:delete(?ERLANG_NAME_OWNERSHIP_TABLE, Key),
+			ok;
+		[] ->
+			ok
+	end.
+
+safe_erlang_unregister(Name, Pid) ->
+	case erlang:whereis(Name) of
+		Pid ->
+			catch erlang:unregister(Name),
+			ok;
+		_ ->
+			ok
+	end.
+
 %% @doc Perform the actual registration (fast path)
 do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
     %% Monitor the pid only if it's new to the registry
@@ -1557,6 +1697,7 @@ do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMa
 do_unregister(Key, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
 	case ets:lookup(?REGISTRY_TABLE, Key) of
 		[{Key, Pid, _}] ->
+			cleanup_erlang_name_ownership(Key, Pid),
 			%% Remove from ETS
 			ets:delete(?REGISTRY_TABLE, Key),
 			%% Remove all tags for this key from tag index
@@ -1713,6 +1854,7 @@ remove_dead_pid_entries(Pid, {PidSingleton, PidKeyMap, Subscribers, MonitorMap})
 		Keys ->
 			%% Remove all entries for this pid from ETS
 			lists:foreach(fun(Key) -> 
+				cleanup_erlang_name_ownership(Key, Pid),
 				ets:delete(?REGISTRY_TABLE, Key),
 				%% Also remove all tags for this key from tag index
 				ets:match_delete(?TAG_INDEX_TABLE, {'_', Key}),
