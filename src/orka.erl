@@ -1351,42 +1351,23 @@ handle_call({register_with, Key, Metadata, M, F, A}, _From, {PidSingleton, PidKe
 	end;
 
 handle_call({register_single, Key, Pid, Metadata}, _From, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
-	%% Check if this Pid is already registered as singleton
-	case maps:get(Pid, PidSingleton, undefined) of
-		undefined ->
-			%% Pid not registered as singleton, check if registered at all
-			case maps:get(Pid, PidKeyMap, []) of
-				[] ->
-					%% Pid not registered, proceed with registration
-					case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) of
-						{reply, Reply, {UpdatedSingleton, UpdatedKeyMap, UpdatedSubs, UpdatedMonitors}} ->
-							case Reply of
-								{ok, Entry} ->
-									%% Add to singleton map
-									NewSingleton = maps:put(Pid, Key, UpdatedSingleton),
-									{reply, {ok, Entry}, {NewSingleton, UpdatedKeyMap, UpdatedSubs, UpdatedMonitors}};
-								_ ->
-									{reply, Reply, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
-							end
-					end;
-				_ExistingKeys ->
-					%% Pid already has non-singleton registrations
-					{reply, {error, {already_registered, _ExistingKeys}}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
-			end;
-		ExistingKey ->
-			%% Pid already registered as singleton
-			case ExistingKey =:= Key of
+	case ets:lookup(?REGISTRY_TABLE, Key) of
+		[{Key, ExistingPid, _ExistingMetadata} = Entry] ->
+			case is_process_alive(ExistingPid) of
 				true ->
-					case ets:lookup(?REGISTRY_TABLE, ExistingKey) of
-						[Entry] ->
+					case ExistingPid =:= Pid of
+						true ->
 							{reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
-						[] ->
-							%% Stale singleton entry, allow re-registration under requested key
-							do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap})
+						false ->
+							{reply, {error, {already_registered_under_key, Key}},
+							 {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
 					end;
 				false ->
-					{reply, {error, {already_registered_under_key, ExistingKey}}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
-			end
+					NewState = remove_dead_pid_entries(ExistingPid, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}),
+					register_single_new(Key, Pid, Metadata, NewState)
+			end;
+		[] ->
+			register_single_new(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap})
 	end;
 
 %% @doc Handle subscribe-await requests - non-blocking subscription with timeout tracking
@@ -1455,6 +1436,45 @@ handle_call({unsubscribe, Key, CallerPid}, _From, {PidSingleton, PidKeyMap, Subs
 				_ -> maps:put(Key, NewList, Subscribers)
 			end,
 			{reply, ok, {PidSingleton, PidKeyMap, NewSubscribers, MonitorMap}}
+	end.
+
+register_single_new(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) ->
+	%% Check if this Pid is already registered as singleton
+	case maps:get(Pid, PidSingleton, undefined) of
+		undefined ->
+			%% Pid not registered as singleton, check if registered at all
+			case maps:get(Pid, PidKeyMap, []) of
+				[] ->
+					%% Pid not registered, proceed with registration
+					case do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}) of
+						{reply, Reply, {UpdatedSingleton, UpdatedKeyMap, UpdatedSubs, UpdatedMonitors}} ->
+							case Reply of
+								{ok, Entry} ->
+									%% Add to singleton map
+									NewSingleton = maps:put(Pid, Key, UpdatedSingleton),
+									{reply, {ok, Entry}, {NewSingleton, UpdatedKeyMap, UpdatedSubs, UpdatedMonitors}};
+								_ ->
+									{reply, Reply, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
+							end
+					end;
+				_ExistingKeys ->
+					%% Pid already has non-singleton registrations
+					{reply, {error, {already_registered, _ExistingKeys}}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
+			end;
+		ExistingKey ->
+			%% Pid already registered as singleton
+			case ExistingKey =:= Key of
+				true ->
+					case ets:lookup(?REGISTRY_TABLE, ExistingKey) of
+						[Entry] ->
+							{reply, {ok, Entry}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}};
+						[] ->
+							%% Stale singleton entry, allow re-registration under requested key
+							do_register(Key, Pid, Metadata, {PidSingleton, PidKeyMap, Subscribers, MonitorMap})
+					end;
+				false ->
+					{reply, {error, {already_registered_under_key, ExistingKey}}, {PidSingleton, PidKeyMap, Subscribers, MonitorMap}}
+			end
 	end.
 
 %% @doc Handle process 'DOWN' messages from monitors
